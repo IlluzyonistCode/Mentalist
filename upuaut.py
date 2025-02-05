@@ -14,6 +14,7 @@ import pytz
 import time
 import random
 from undetected_playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from pywinauto.timings import TimeoutError as WindowTimeoutError
 from collections import OrderedDict
 from copy import deepcopy
 from playsound import playsound
@@ -3315,7 +3316,7 @@ class Spinner:
 		self.app = None
 
 	@staticmethod
-	def wait(filename, confidence=0.9, check_fail=False, check_count=7, click=True):
+	def wait(filename, confidence=0.9, check_fail=False, check_count=6, click=True):
 		fails = 0
 
 		while True:
@@ -3338,6 +3339,13 @@ class Spinner:
 
 			time.sleep(5)
 
+	def close_all(self):
+		self.app.Dialog['HD-Player'].type_keys('^+5')
+
+		time.sleep(1)
+
+		self.app.Dialog['HD-Player'].type_keys('{DEL}{ESC}')	
+
 	def kill(self):
 		self.app = None
 
@@ -3348,48 +3356,49 @@ class Spinner:
 				return
 
 	def spin(self):
-		while True:
-			print(f'{Style.BRIGHT}{Fore.YELLOW}Checking ad button...')
+		try:
+			while True:
+				print(f'{Style.BRIGHT}{Fore.YELLOW}Checking ad button...')
 
-			self.app.Dialog.click_input(coords=(0, 0))
+				self.app.Dialog.click_input(coords=(0, 0))
 
-			if not self.wait('done.png', confidence=0.8, check_fail=True, check_count=2):
-				print(f'{Style.BRIGHT}{Fore.GREEN}DONE!')
+				if not self.wait('done.png', confidence=0.8, check_fail=True, check_count=3):
+					print(f'{Style.BRIGHT}{Fore.GREEN}DONE!')
 
-				playsound('audio/confusion.mp3')
+					playsound('audio/confusion.mp3')
 
-				return 1
+					return 1
 
-			if self.wait('ad.png', confidence=0.8, check_fail=True):
-				print(f'{Style.BRIGHT}{Fore.RED}Loading takes too long.')
+				if self.wait('ad.png', confidence=0.8, check_fail=True):
+					print(f'{Style.BRIGHT}{Fore.RED}Loading takes too long.')
 
-				return
+					return
 
-			print(f'{Style.BRIGHT}{Fore.YELLOW}Watching ad...')
+				print(f'{Style.BRIGHT}{Fore.YELLOW}Watching ad...')
 
-			time.sleep(35)
+				time.sleep(60)
 
-			self.app[self.BLUESTACKS5_NAME].Button0.click()
+				self.app[self.BLUESTACKS5_NAME].Button0.click()
 
-			print(f'{Style.BRIGHT}{Fore.YELLOW}Checking spin button...')
+				print(f'{Style.BRIGHT}{Fore.YELLOW}Checking spin button...')
 
-			if self.wait('spin.png', confidence=0.8, check_fail=True):
-				print(f'{Style.BRIGHT}{Fore.RED}Spin button not found.') 
+				if self.wait('spin.png', confidence=0.8, check_fail=True):
+					print(f'{Style.BRIGHT}{Fore.RED}Spin button not found.') 
 
-				return
+					return
 
-			else:
-				print(f'{Style.BRIGHT}{Fore.GREEN}Spinned!')
+				else:
+					print(f'{Style.BRIGHT}{Fore.GREEN}Spinned!')
+		except pywinauto.findwindows.ElementNotFoundError:
+			return 2
 
 	def prepare(self):
-		banner(self.__class__.__name__)
-
 		print(f'{Style.BRIGHT}{Fore.YELLOW}Waiting for BlueStacks 5...')
 
 		subprocess.Popen([self.BLUESTACKS5_EXECUTABLE, '--cmd', 'launchApp', '--package', 'com.werewolfapps.online'], stdout=subprocess.PIPE)
 		
 		try:
-			self.app = pywinauto.Application(backend='uia').connect(title=self.BLUESTACKS5_NAME, timeout=10)
+			self.app = pywinauto.Application(backend='uia').connect(title=self.BLUESTACKS5_NAME, timeout=30)
 
 			window = pygetwindow.getWindowsWithTitle(self.BLUESTACKS5_NAME)[0]
 			window.size = (540, 934)
@@ -3397,23 +3406,40 @@ class Spinner:
 			input(f'{Style.BRIGHT}{Back.RED}Name of BlueStacks 5 window is invalid!{Back.RESET}')
 
 			os.abort()
+		except pywinauto.findwindows.ElementNotFoundError:
+			return 1
 
 		print(f'{Style.BRIGHT}{Fore.YELLOW}Waiting for the game to load...')
 
-		self.wait('profile.png', click=False)
+		if self.wait('profile.png', click=False, check_fail=True, check_count=12):
+			return 1
+
 		self.wait('cancel.png', check_fail=True, check_count=3)
 		self.app.Dialog.click_input(coords=(80, 40))
 
 		print(f'{Style.BRIGHT}{Fore.GREEN}Game loaded!')
 
 	def run(self):
-		banner(self.__class__.__name__)
-
 		try:
 			while True:
-				self.prepare()
+				banner(self.__class__.__name__)
 
-				if self.spin():
+				while True:
+					try:
+						if self.prepare():
+							print(f'{Style.BRIGHT}{Fore.RED}The game failed to load.')
+							print(f'{Style.BRIGHT}{Fore.RED}Restarting...')
+
+							self.close_all()
+
+						else:
+							break
+					except pywinauto.findwindows.ElementNotFoundError:
+						continue
+
+				result = self.spin()
+
+				if result == 1:
 					self.kill()
 
 					print(f'\n{Style.BRIGHT}{Fore.YELLOW}Press Enter to exit.{Fore.RESET}')
@@ -3421,13 +3447,12 @@ class Spinner:
 
 					return
 
-				print(f'{Style.BRIGHT}{Fore.YELLOW}Restarting...')
+				elif result == 2:
+					continue
 
-				self.app.Dialog['HD-Player'].type_keys('^+5')
+				print(f'{Style.BRIGHT}{Fore.RED}Restarting...')
 
-				time.sleep(1)
-
-				self.app.Dialog['HD-Player'].type_keys('{DEL}{ESC}')
+				self.close_all()
 		except KeyboardInterrupt:
 			self.kill()
 
