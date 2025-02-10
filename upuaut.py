@@ -14,7 +14,8 @@ import pytz
 import time
 import random
 from undetected_playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from pywinauto.timings import TimeoutError as WindowTimeoutError
+from pywinauto.findwindows import ElementNotFoundError
+from pywinauto.findbestmatch import MatchError
 from collections import OrderedDict
 from copy import deepcopy
 from playsound import playsound
@@ -495,7 +496,7 @@ class Tracker:
 
 		roles['red-lady'] = roles.pop('harlot')
 
-		roles['random-villager-support'] = {
+		roles['random-support'] = {
 			'team': 'VILLAGER',
 			'aura': 'GOOD',
 			'name': 'RSPV'
@@ -1267,7 +1268,7 @@ class Tracker:
 
 					player = service_message.split(sep)[1]
 
-			elif 'сделал' in service_message:
+			elif 'сделал выстрел' in service_message:
 				player = service_message.split(' сделал выстрел в ')[1]
 
 			elif 'зарезал' in service_message:
@@ -1980,7 +1981,6 @@ class Tracker:
 					headless=False,
 					args=[
 						'--window-position=-7,40',
-						'--mute-audio',
 						'--disable-blink-features=AutomationControlled'
 					],
 					ignore_default_args=['--enable-automation'],
@@ -3389,7 +3389,7 @@ class Spinner:
 
 				else:
 					print(f'{Style.BRIGHT}{Fore.GREEN}Spinned!')
-		except pywinauto.findwindows.ElementNotFoundError:
+		except ElementNotFoundError:
 			return 2
 
 	def prepare(self):
@@ -3406,7 +3406,7 @@ class Spinner:
 			input(f'{Style.BRIGHT}{Back.RED}Name of BlueStacks 5 window is invalid!{Back.RESET}')
 
 			os.abort()
-		except pywinauto.findwindows.ElementNotFoundError:
+		except ElementNotFoundError:
 			return 1
 
 		print(f'{Style.BRIGHT}{Fore.YELLOW}Waiting for the game to load...')
@@ -3415,7 +3415,11 @@ class Spinner:
 			return 1
 
 		self.wait('cancel.png', check_fail=True, check_count=3)
-		self.app.Dialog.click_input(coords=(80, 40))
+
+		try:
+			self.app.Dialog.click_input(coords=(80, 40))
+		except MatchError:
+			return 1
 
 		print(f'{Style.BRIGHT}{Fore.GREEN}Game loaded!')
 
