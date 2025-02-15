@@ -14,8 +14,6 @@ import pytz
 import time
 import random
 from undetected_playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from pywinauto.findwindows import ElementNotFoundError
-from pywinauto.findbestmatch import MatchError
 from collections import OrderedDict
 from copy import deepcopy
 from playsound import playsound
@@ -2066,6 +2064,13 @@ class Booster:
 		self.config = dotenv_values('.env')
 
 		try:
+			self.PLAYER_NAME = self.config['PLAYER_NAME']
+		except KeyError:
+			input(f'{Style.BRIGHT}{Back.RED}Player Name not found!{Back.RESET}')
+
+			os.abort()
+
+		try:
 			self.CHROME_EXECUTABLE = self.config['CHROME_EXECUTABLE']
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome not found!{Back.RESET}')
@@ -2127,11 +2132,10 @@ class Booster:
 					time.sleep(0.1)
 
 					player_base_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[2]/div/div[1]/div/div[{i}]/div[{j}]/div')
-					player_img_base_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[2]/div/div[1]/div/div[{i}]/div[{j}]/div')
-					name_locator = player_base_locator.locator('xpath=/div[1]/div/div[4]/div/div')
-					name = name_locator.text_content(timeout=1000).split(' ')[1]
+					player_img_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[2]/div/div[1]/div/div[{i}]/div[{j}]/div')
 
-					icons = player_img_base_locator.evaluate('''
+					name = player_base_locator.text_content(timeout=1000).split(' ')[1]
+					icons = player_img_locator.evaluate('''
 						(player) => {
 							let sources = [];
 
@@ -2151,7 +2155,7 @@ class Booster:
 					}
 
 					try:
-						if name_locator.evaluate('name => name.style.color') == 'rgb(236, 64, 122)':
+						if name == self.PLAYER_NAME:
 							player['self'] = True
 
 							self_number = 4 * (i - 1) + j
@@ -2179,7 +2183,7 @@ class Booster:
 							couples.append(4 * (i - 1) + j)
 
 					players.append(player)
-				except PlaywrightTimeoutError:
+				except (PlaywrightTimeoutError, IndexError):
 					continue
 
 		if wolf_seer:
@@ -2217,10 +2221,10 @@ class Booster:
 		if tag:
 			print(f'{Style.BRIGHT}{Fore.YELLOW}Finding target...')
 
-			remaining_time = 30 - start_time
+			remaining_time = 30 - (time.monotonic() - start_time)
 
-			if remaining_time - 5 >= 0:
-				time.sleep(remaining_time - 5)
+			if remaining_time >= 10:
+				time.sleep(remaining_time - 10)
 
 			chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[1]/div[3]/div/div[2]/div/div[1]/div/div/div')
 
@@ -2362,7 +2366,7 @@ class Booster:
 				play_again_button.click(timeout=30000)
 
 				try:
-					host_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div[2]/div/div/div[2]/div/div/div[3]/div[2]/div/div')
+					host_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[3]/div/div[2]/div[3]/div[2]/div/div')
 					
 					if host_button.text_content(timeout=1000) == 'Окей':
 						host_button.click()
@@ -3389,58 +3393,51 @@ class Spinner:
 
 				else:
 					print(f'{Style.BRIGHT}{Fore.GREEN}Spinned!')
-		except ElementNotFoundError:
+		except (pywinauto.findwindows.ElementNotFoundError, OSError):
 			return 2
 
 	def prepare(self):
-		print(f'{Style.BRIGHT}{Fore.YELLOW}Waiting for BlueStacks 5...')
+		while True:
+			try:
+				print(f'{Style.BRIGHT}{Fore.YELLOW}Waiting for BlueStacks 5...')
 
-		subprocess.Popen([self.BLUESTACKS5_EXECUTABLE, '--cmd', 'launchApp', '--package', 'com.werewolfapps.online'], stdout=subprocess.PIPE)
-		
-		try:
-			self.app = pywinauto.Application(backend='uia').connect(title=self.BLUESTACKS5_NAME, timeout=30)
+				subprocess.Popen([self.BLUESTACKS5_EXECUTABLE, '--cmd', 'launchApp', '--package', 'com.werewolfapps.online'], stdout=subprocess.PIPE)
+				
+				try:
+					self.app = pywinauto.Application(backend='uia').connect(title=self.BLUESTACKS5_NAME, timeout=30)
 
-			window = pygetwindow.getWindowsWithTitle(self.BLUESTACKS5_NAME)[0]
-			window.size = (540, 934)
-		except IndexError:
-			input(f'{Style.BRIGHT}{Back.RED}Name of BlueStacks 5 window is invalid!{Back.RESET}')
+					window = pygetwindow.getWindowsWithTitle(self.BLUESTACKS5_NAME)[0]
+					window.size = (540, 934)
+				except IndexError:
+					input(f'{Style.BRIGHT}{Back.RED}Name of BlueStacks 5 window is invalid!{Back.RESET}')
 
-			os.abort()
-		except ElementNotFoundError:
-			return 1
+					os.abort()
 
-		print(f'{Style.BRIGHT}{Fore.YELLOW}Waiting for the game to load...')
+				print(f'{Style.BRIGHT}{Fore.YELLOW}Waiting for the game to load...')
 
-		if self.wait('profile.png', click=False, check_fail=True, check_count=12):
-			return 1
+				if self.wait('profile.png', click=False, check_fail=True, check_count=12):
+					continue
 
-		self.wait('cancel.png', check_fail=True, check_count=3)
+				self.wait('cancel.png', check_fail=True, check_count=3)
+				self.app.Dialog.click_input(coords=(80, 40))
 
-		try:
-			self.app.Dialog.click_input(coords=(80, 40))
-		except MatchError:
-			return 1
+				print(f'{Style.BRIGHT}{Fore.GREEN}Game loaded!')
 
-		print(f'{Style.BRIGHT}{Fore.GREEN}Game loaded!')
+				break
+			except:
+				print(f'{Style.BRIGHT}{Fore.RED}The game failed to load.')
+				print(f'{Style.BRIGHT}{Fore.RED}Restarting...')
+
+				self.close_all()
+
+				continue
 
 	def run(self):
 		try:
 			while True:
 				banner(self.__class__.__name__)
 
-				while True:
-					try:
-						if self.prepare():
-							print(f'{Style.BRIGHT}{Fore.RED}The game failed to load.')
-							print(f'{Style.BRIGHT}{Fore.RED}Restarting...')
-
-							self.close_all()
-
-						else:
-							break
-					except pywinauto.findwindows.ElementNotFoundError:
-						continue
-
+				self.prepare()
 				result = self.spin()
 
 				if result == 1:
