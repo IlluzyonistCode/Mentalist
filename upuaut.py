@@ -8,6 +8,7 @@ import ntplib
 import copy
 import json
 import os
+import re
 import subprocess
 import dateutil
 import pytz
@@ -16,6 +17,8 @@ import random
 from undetected_playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from collections import OrderedDict
 from copy import deepcopy
+from itertools import combinations
+from functools import lru_cache
 from playsound import playsound
 from colorama import Back, Fore, Style, init
 from dotenv import dotenv_values
@@ -23,6 +26,668 @@ from dotenv import dotenv_values
 init(autoreset=True)
 
 requests.packages.urllib3.disable_warnings()
+
+
+class GameState:
+	def __init__(self, tracker):
+		self.players = []
+
+		for p_template in deepcopy(tracker.PLAYERS):
+			player = {
+				'name': p_template.get('name'),
+				'role': p_template.get('role'),
+				'team': p_template.get('team'),
+				'dead': p_template.get('dead', False),
+				'abilities_used': {},
+				'protected': 0,
+				'blocked': False,
+				'jailed': False,
+				'doused': False,
+				'wounded': False,
+				'lover': None,
+				'marked_by_marksman': False,
+				'recruits': [],
+				'is_accomplice': False
+			}
+			self.players.append(player)
+
+		self.rotation = tracker.ROTATION
+		self.pending_effects = []
+
+
+class Mastermind:
+	def __init__(self, tracker):
+		self.tracker = tracker
+		self.profiles = self.load_profiles()
+		self.action_history = []
+		self.update_state()
+
+	def load_profiles(self, filename='role_profiles.json'):
+		try:
+			with open(filename, 'r', encoding='utf-8') as f:
+				return json.load(f)
+		except FileNotFoundError:
+			print(f'{Style.BRIGHT}{Back.RED}Role profiles not found!{Back.RESET}')
+
+			return {}
+
+	def update_state(self):
+		self.state = GameState(self.tracker)
+		self.action_history = []
+		self.initialize_special_roles(self.state)
+
+	def initialize_special_roles(self, state):
+		pass
+
+
+	def get_role_strategic_value(self, role_id):
+		if not role_id:
+			return 5
+
+		role_profile = self.profiles.get(role_id)
+
+		if role_profile and 'strategic_value' in role_profile:
+			return role_profile['strategic_value']
+		
+		team_map = {
+			'VILLAGER': 10,
+			'WEREWOLF': -15,
+			'SOLO': -10
+		}
+		
+		role_data = self.tracker.ROLES.get(role_id)
+		
+		if role_data and role_data.get('team') in team_map:
+			return team_map[role_data.get('team')]
+
+		return 5
+
+	def calculate_lynch_scores(self, state):
+		scores = {}
+		original_players = {p['name']: p for p in self.tracker.PLAYERS}
+		living_players = [p for p in state.players if not p['dead']]
+		
+		for player in living_players:
+			score = 100.0
+			
+			player_data = original_players.get(player['name'])
+
+			if not player_data:
+				scores[player['name']] = score
+
+				continue
+
+			known_role = player.get('role')
+			known_team = player_data.get('team')
+			known_aura = player_data.get('aura')
+
+			if known_role and self.tracker.ROLES.get(known_role):
+				role_info = self.tracker.ROLES.get(known_role)
+				role_team = role_info.get('team')
+
+				if role_team == 'VILLAGER':
+					score *= 0.1
+
+				elif role_team == 'SOLO':
+					score *= 5
+
+				elif role_team == 'WEREWOLF':
+					score *= 10.0
+			
+			elif known_team:
+				if known_team == 'VILLAGER':
+					score *= 0.2
+
+				elif known_team == 'SOLO':
+					score *= 2.5
+
+				elif known_team == 'WEREWOLF':
+					score *= 10.0
+
+			elif known_aura:
+				if known_aura == 'GOOD':
+					score *= 0.3
+
+				elif known_aura == 'UNKNOWN':
+					score *= 1.5
+
+				elif known_aura == 'EVIL':
+					score *= 10.0
+
+			msg_count = len(player_data.get('messages', []))
+
+			if msg_count <= 2:
+				score *= 1.5
+
+			elif msg_count > 10:
+				score *= 0.8
+
+			mention_count = len(player_data.get('mentions', []))
+
+			score *= (1 + (mention_count * 0.25))
+
+			scores[player['name']] = max(1, score)
+			
+		return scores
+
+	def calculate_target_priority_scores(self, actor, ability, state, lynch_scores):
+		scores = {}
+		ability_type = ability.get('type', '')
+		
+		for player in state.players:
+			if player['dead']:
+				continue
+
+			name = player['name']
+			base_suspicion = lynch_scores.get(name, 100)
+			strategic_value = self.get_role_strategic_value(player['role'])
+
+			if 'kill' in ability_type or 'douse' in ability_type:
+				if strategic_value > 0:
+					scores[name] = strategic_value * 2 + base_suspicion
+
+				else:
+					scores[name] = base_suspicion * 0.1
+			
+			elif 'protect' in ability_type:
+				if strategic_value > 0:
+					scores[name] = strategic_value * 2 + (200 - base_suspicion)
+				
+				else:
+					scores[name] = 0
+			
+			elif 'investigate' in ability_type or 'check' in ability_type:
+				if player['role']:
+					scores[name] = 0
+
+				else:
+					scores[name] = base_suspicion
+
+			else:
+				scores[name] = base_suspicion
+
+		return scores
+
+	@lru_cache(maxsize=2048)
+	def get_possible_actions(self, state_tuple):
+		state = self.tuple_to_state(state_tuple)
+		all_actions = []
+		
+		alive_players = [p for p in state.players if not p['dead']]
+		lynch_scores = self.calculate_lynch_scores(state)
+
+		for player in alive_players:
+			if not player['role'] or player.get('blocked') or player.get('jailed'):
+				continue
+			
+			role_abilities = self.profiles.get(player['role'], {}).get('abilities', [])
+
+			for ability in role_abilities:
+				if self.is_ability_valid(player, ability, state):
+					potential_targets = self.get_potential_targets(player, ability.get('targets', {}), state)
+					
+					if potential_targets:
+						max_t = ability.get('max_targets', 1)
+						
+						TARGET_LIMIT = 5
+
+						if len(potential_targets) > TARGET_LIMIT:
+							priority_scores = self.calculate_target_priority_scores(player, ability, state, lynch_scores)
+							sorted_targets = sorted(potential_targets, key=lambda p: priority_scores.get(p['name'], 0), reverse=True)
+							interesting_targets = sorted_targets[:TARGET_LIMIT]
+						
+						else:
+							interesting_targets = potential_targets
+
+						for k in range(1, max_t + 1):
+							if len(interesting_targets) < k:
+								continue
+							
+							for target_combo in combinations(interesting_targets, k):
+								final_target = target_combo[0] if len(target_combo) == 1 else target_combo
+								
+								all_actions.append({
+									'actor': player,
+									'ability': ability,
+									'target': final_target
+								})
+
+					elif ability.get('max_targets', 1) == 0:
+						all_actions.append({
+							'actor': player,
+							'ability': ability,
+							'target': None
+						})
+
+		total_score = sum(lynch_scores.values())
+		no_lynch_score = total_score * 0.15
+		total_score_with_no_lynch = total_score + no_lynch_score
+
+		if total_score_with_no_lynch > 0:
+			living_players_map = {p['name']: p for p in alive_players}
+
+			for name, score in lynch_scores.items():
+				prob = score / total_score_with_no_lynch
+
+				if prob > 0:
+					target_player = living_players_map.get(name)
+					all_actions.append({
+						'actor': {
+							'name': 'Village',
+							'role': 'vote'
+						},
+						'ability': {
+							'description': f'Lynch {name}',
+							'type': 'lynch',
+							'base_prob': prob
+						},
+						'target': target_player
+					})
+			
+			no_lynch_prob = no_lynch_score / total_score_with_no_lynch
+			all_actions.append({
+				'actor': {
+					'name': 'Village',
+					'role': 'vote'
+				},
+				'ability': {
+					'description': 'No Lynch',
+					'type': 'no_lynch',
+					'base_prob': no_lynch_prob
+				},
+				'target': None
+			})
+
+		return all_actions
+
+	def is_ability_valid(self, player, ability, state):
+		uses = player.get('abilities_used', {}).get(ability.get('type'), 0)
+
+		if uses >= ability.get('max_uses', 1):
+			return 0
+
+		ability_type = ability.get('type')
+
+		if player['role'] == 'instigator' and ability_type == 'kill':
+			alive_recruits = [p for name in player.get('recruits', []) for p in state.players if p['name'] == name and not p['dead']]
+
+			if alive_recruits:
+				return 0
+
+		if player['role'] == 'marksman' and ability_type == 'kill':
+			return player.get('marked_by_marksman', False)
+
+		return 1
+
+	def get_potential_targets(self, actor, constraints, state):
+		targets = []
+
+		for player in state.players:
+			if player['name'] == actor['name'] and not constraints.get('can_target_self', False):
+				continue
+
+			valid = True
+
+			for key, val in constraints.items():
+				if key == 'status' and player['dead'] != val:
+					valid = False; break
+
+				if key == 'team' and player.get('team') != val:
+					valid = False; break
+
+				if key == 'is_doused' and not player.get('doused'):
+					valid = False; break
+
+			if valid:
+				targets.append(player)
+
+		return targets
+
+	def get_action_signature(self, action):
+			actor_name = action['actor']['name']
+			ability_type = action['ability'].get('type')
+
+			target = action.get('target')
+			target_signature = None
+
+			if isinstance(target, dict):
+				target_signature = target['name'] or ''
+
+			elif isinstance(target, tuple):
+				target_signature = tuple(sorted([t['name'] or '' for t in target]))
+				
+			return (actor_name, ability_type, target_signature)
+
+	def predict(self, max_depth=3, prob_threshold=0.01, player_name=None):
+		initial_state_tuple = self.state_to_tuple(self.state)
+
+		scenarios = [{
+			'state_tuple': initial_state_tuple,
+			'prob': 1.0,
+			'path': [],
+			'score': 0,
+			'path_signature_set': set()
+		}]
+		final_scenarios = []
+
+		for depth in range(max_depth):
+			next_scenarios = []
+
+			if not scenarios:
+				break
+
+			for scenario in scenarios:
+				possible_actions = self.get_possible_actions(scenario['state_tuple'])
+
+				if not possible_actions:
+					final_scenarios.append(scenario)
+
+					continue
+
+				for action in possible_actions:
+					action_signature = self.get_action_signature(action)
+
+					if action_signature in scenario['path_signature_set']:
+						continue
+
+					new_scenario = self.apply_action(scenario, action, action_signature)
+					next_scenarios.append(new_scenario)
+			
+			scenarios = self.prune_scenarios(next_scenarios, prob_threshold)
+
+		final_scenarios.extend(scenarios)
+
+		for s in final_scenarios:
+			s['state_obj'] = self.tuple_to_state(s['state_tuple'])
+
+		def get_sort_key(scenario):
+			score = scenario.get('score', 0)
+
+			if player_name and scenario['path']:
+				last_action = scenario['path'][-1]
+				target_in_action = last_action.get('target')
+				is_involved = False
+
+				if target_in_action:
+					if isinstance(target_in_action, tuple):
+						is_involved = any(t['name'] == player_name for t in target_in_action)
+
+					else:
+						is_involved = target_in_action['name'] == player_name
+				
+				if is_involved or last_action['actor']['name'] == player_name:
+					score *= 2.0
+			
+			return score
+
+		return sorted(final_scenarios, key=get_sort_key, reverse=True)
+
+	def check_vengeance_deaths(self, state, dead_player=None):
+		if not dead_player:
+			return
+
+		dead_player_name = dead_player['name']
+		target_to_kill = next((p for p in state.players if p.get('marked_to_die_with') == dead_player_name and not p['dead']), None)
+		
+		if target_to_kill:
+			target_to_kill['dead'] = True
+
+			self.check_lover_deaths(state, dead_player=target_to_kill)
+
+	def apply_action(self, scenario, action, action_signature):
+		state = self.tuple_to_state(scenario['state_tuple'])
+		new_path = scenario['path'] + [action]
+		ability = action['ability']
+		prob = ability.get('base_prob', 0.8)
+		actor_name = action['actor']['name']
+
+		if actor_name == 'Village':
+			actor = None
+
+		else:
+			actor = next((p for p in state.players if p['name'] == actor_name), None)
+
+		if actor_name != 'Village' and not actor:
+			return scenario
+
+		action_target = action['target']
+		targets_to_process = []
+
+		if isinstance(action_target, tuple):
+			targets_to_process.extend(action_target)
+
+		elif action_target:
+			targets_to_process.append(action_target)
+		
+		if actor:
+			ability_type = ability.get('type')
+			uses = actor['abilities_used'].get(ability_type, 0)
+			actor['abilities_used'][ability_type] = uses + 1
+
+		for target_data in targets_to_process:
+			target = next((p for p in state.players if p['name'] == target_data['name']), None)
+			
+			if not target:
+				continue
+			
+			ability_type = ability.get('type')
+
+			if ability_type == 'lynch':
+				target['dead'] = True
+
+				self.check_lover_deaths(state, dead_player=target)
+				self.check_vengeance_deaths(state, dead_player=target)
+
+			elif ability_type == 'jail':
+				target['jailed'] = True
+
+			elif ability_type in {'mark_for_vengeance', 'tag'}:
+				for p in state.players:
+					if p.get('marked_to_die_with') == actor['name']:
+						del p['marked_to_die_with']
+
+				target['marked_to_die_with'] = actor['name']
+
+			elif 'kill' in ability_type:
+				immune_roles = {
+					'arsonist', 'serial-killer', 'corruptor', 'bandit', 'werewolf'
+				}
+
+				is_killer_vs_killer = (actor and actor.get('team') == 'WEREWOLF' and target.get('role') in immune_roles) or \
+									  (actor and actor.get('role') in immune_roles and target.get('team') == 'WEREWOLF')
+
+				if is_killer_vs_killer:
+					pass
+
+				elif target['role'] == 'stubborn-werewolf' and not target.get('wounded'):
+					target['wounded'] = True
+
+				elif target['protected'] < 1:
+					target['dead'] = True
+
+					self.check_lover_deaths(state, dead_player=target)
+					self.check_vengeance_deaths(state, dead_player=target)
+
+				else:
+					target['protected'] -= 1
+
+			elif ability_type == 'protect':
+				target['protected'] += 1
+
+			elif ability_type in {'block', 'mute'}:
+				target['blocked'] = True
+
+			elif ability_type == 'douse':
+				target['doused'] = True
+
+			elif ability_type == 'convert' and actor:
+				if target['team'] == 'VILLAGER':
+					target['team'] = actor['team']
+					target['is_accomplice'] = True
+
+				elif target['team'] == 'WEREWOLF':
+					target['dead'] = True
+
+			elif ability_type == 'zombie_bite':
+				state.pending_effects.append({
+					'type': 'zombie_conversion',
+					'target': target['name'],
+					'delay': 2
+				})
+
+		ability_type_no_target = ability.get('type')
+
+		if ability_type_no_target == 'no_lynch':
+			pass
+
+		elif ability_type_no_target == 'reveal_mayor' and actor:
+			actor['revealed_mayor'] = True
+
+		elif ability_type_no_target == 'reveal_and_pacify':
+			pass
+
+		elif ability_type_no_target == 'ignite':
+			for p in state.players:
+				if p.get('doused'):
+					if p.get('protected') < 1:
+						p['dead'] = True
+
+					else:
+						p['protected'] -= 1
+
+					p['doused'] = False
+
+		win_metric = self.calculate_win_metric(state)
+		current_prob = scenario['prob'] * prob
+		score = current_prob * win_metric
+
+		new_signature_set = scenario['path_signature_set'].copy()
+		new_signature_set.add(action_signature)
+
+		return {
+			'state_tuple': self.state_to_tuple(state),
+			'prob': current_prob,
+			'path': new_path,
+			'score': score,
+			'path_signature_set': new_signature_set
+		}
+	
+	def check_lover_deaths(self, state, dead_player=None):
+		if dead_player and dead_player.get('lover'):
+			lover_name = dead_player['lover']
+			lover_player = next((p for p in state.players if p['name'] == lover_name and not p['dead']), None)
+
+			if lover_player:
+				lover_player['dead'] = True
+
+				self.check_lover_deaths(state, dead_player=lover_player)
+				self.check_vengeance_deaths(state, dead_player=target)
+
+	def process_pending_effects(self, state):
+		remaining_effects = []
+
+		for effect in state.pending_effects:
+			effect['delay'] -= 1
+
+			if effect['delay'] <= 0:
+				target = next((p for p in state.players if p['name'] == effect['target']), None)
+
+				if target:
+					if effect['type'] == 'zombie_conversion':
+						target['team'] = 'ZOMBIE'
+
+					elif effect['type'] == 'corruptor_kill':
+						target['dead'] = True
+
+			else:
+				remaining_effects.append(effect)
+
+		state.pending_effects = remaining_effects
+
+	def prune_scenarios(self, scenarios, threshold):
+		if not scenarios: 
+			return []
+		
+		BEAM_WIDTH = 25 
+
+		sorted_scenarios = sorted(scenarios, key=lambda x: x.get('score', 0), reverse=True)
+		
+		return sorted_scenarios[:BEAM_WIDTH]
+
+	def calculate_win_metric(self, state):
+		alive = [p for p in state.players if not p['dead']]
+
+		if not alive:
+			return 0.0
+
+		teams = [p.get('team') for p in alive]
+
+		villager_count = teams.count('VILLAGER')
+		werewolf_count = teams.count('WEREWOLF')
+		
+		if werewolf_count == 0:
+			return villager_count / len(alive)
+
+		if villager_count <= werewolf_count:
+			return werewolf_count / len(alive)
+
+		return 0.5
+
+	def optimize_strategy(self, scenarios):
+		if not scenarios:
+			return {'action': None, 'expected_success': 0}
+
+		best_scenario = max(scenarios, key=lambda x: x['prob'] * self.calculate_win_metric(x['state_obj']))
+		first_action = best_scenario['path'][0] if best_scenario['path'] else None
+
+		return {
+			'action': first_action,
+			'expected_success': self.calculate_win_metric(best_scenario['state_obj'])
+		}
+
+	def tuple_to_state(self, state_tuple):
+		players_list = []
+
+		for p_tuple in state_tuple[0]:
+			player_dict = dict(p_tuple)
+			
+			if 'abilities_used' in player_dict:
+				player_dict['abilities_used'] = dict(player_dict['abilities_used'])
+			
+			players_list.append(player_dict)
+		
+		state = GameState(self.tracker)
+		state.players = players_list
+		state.rotation = [dict(r) for r in state_tuple[1]]
+		state.pending_effects = [dict(e) for e in state_tuple[2]]
+
+		return state
+
+	def state_to_tuple(self, state):
+		player_tuples = []
+		sorted_players = sorted(state.players, key=lambda x: x.get('name') or '')
+
+		for p in sorted_players:
+			def sanitize(val):
+				if isinstance(val, set):
+					return frozenset(val)
+
+				if isinstance(val, list):
+					return tuple(val)
+
+				if isinstance(val, dict):
+					return tuple(sorted(val.items()))
+
+				return val
+
+			items_tuple = tuple((k, sanitize(v)) for k, v in sorted(p.items()))
+			player_tuples.append(items_tuple)
+		
+		players_tuple = tuple(player_tuples)
+		rotation_tuple = tuple(tuple(sorted(role.items())) for role in state.rotation)
+		pending_effects_tuple = tuple(tuple(sorted(effect.items())) for effect in state.pending_effects)
+		
+		return (players_tuple, rotation_tuple, pending_effects_tuple)
 
 
 class Tracker:
@@ -33,18 +698,6 @@ class Tracker:
 			self.API_KEYS = self.config['TRACKER_API_KEYS'].split(',')
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}API key(s) not found!{Back.RESET}')
-
-			os.abort()
-
-		try:
-			self.CHROME_EXECUTABLE = self.config['CHROME_EXECUTABLE']
-		except KeyError:
-			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome not found!{Back.RESET}')
-
-			os.abort()
-
-		if not os.path.isfile(self.CHROME_EXECUTABLE):
-			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome is invalid!{Back.RESET}')
 
 			os.abort()
 
@@ -151,7 +804,6 @@ class Tracker:
 		}
 
 		self.ROTATION_ICONS = {}
-
 		self.PLAYER_CARDS = {}
 		self.ICONS = {}
 
@@ -181,6 +833,11 @@ class Tracker:
 		self.day_chat = None
 		self.dead_chat = None
 		self.last_message_number = 0
+
+		self.mastermind = None
+		self.THREAT_LEVELS = {}
+		self.PLAYER_CLAIMS = {}
+		self.PLAYER_ALLIANCES = {}
 
 	@staticmethod
 	def predict_player_level(received_roses, sent_roses, win_count, lose_count, clan_xp):
@@ -262,7 +919,8 @@ class Tracker:
 	def load_modal(self):
 		messages_html = self.ASSETS['messages']['html']
 
-		field = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div[2]/div[2]/div/div[1]')
+		field = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]')
+
 		field.evaluate('''
 			(field, [messages_html]) => {
 				if (!document.querySelector(".modal-header")) {
@@ -309,7 +967,7 @@ class Tracker:
 					window.messages = new Modal('.messages');
 				}
 			}
-		''', [messages_html,])
+		''', [messages_html])
 
 	def load_see(self, number, layer):
 		see_html = self.ASSETS['see']['html'].format(number)
@@ -420,27 +1078,6 @@ class Tracker:
 		with open('data/icons.json', 'w') as icons_file:
 			json.dump(self.PLAYER_ICONS, icons_file)
 
-	def load_abilities(self):
-		try:
-			with open('data/abilities.json', 'r') as icons_file:
-				self.PLAYER_ABILITIES = json.load(icons_file)
-		except:
-			self.PLAYER_ABILITIES = {}
-
-	def write_abilities(self, player, abilities):
-		if player not in self.PLAYER_ABILITIES:
-			self.PLAYER_ABILITIES[player] = abilities
-
-		else:
-			self.PLAYER_ABILITIES[player].update(abilities)
-
-	def save_abilities(self):
-		if not os.path.isdir('data'):
-			os.mkdir('data')
-
-		with open('data/abilities.json', 'w') as icons_file:
-			json.dump(self.PLAYER_ABILITIES, icons_file)
-
 	def get_roles(self):
 		print(f'{Style.BRIGHT}{Fore.YELLOW}Getting roles...')
 
@@ -522,6 +1159,18 @@ class Tracker:
 			'team': 'VILLAGER',
 			'aura': 'GOOD',
 			'name': 'RO'
+		}
+
+		roles['watchdog'] = {
+			'team': 'VILLAGER',
+			'aura': 'GOOD',
+			'name': 'Watchdog'
+		}
+
+		roles['prayer'] = {
+			'team': 'VILLAGER',
+			'aura': 'GOOD',
+			'name': 'Prayer'
 		}
 
 		advanced_roles = data['advancedRolesMapping']
@@ -633,7 +1282,6 @@ class Tracker:
 		) if level == -1 else level
 
 		cards = {}
-		abilities = {}
 
 		for card in data['roleCards']:
 			if card['rarity'] == 'COMMON':
@@ -657,27 +1305,6 @@ class Tracker:
 						card['roleIdsAdvanced'][i] = 'cursed'
 
 				cards[card['roleIdBase']] = card['roleIdsAdvanced']
-
-			role_abilities = []
-
-			for i in range(1, 6):
-				ability = card.get(f'abilityId{i}', '')
-
-				if 'highlight-chat-msg-' in ability:
-					ability = 'highlight'
-
-				elif 'discussion-time-increase-decrease-' in ability:
-					ability = 'time'
-
-				else:
-					continue
-
-				role_abilities.append(ability)
-
-			abilities[card['roleIdBase']] = role_abilities
-
-			for advanced_role in card['roleIdsAdvanced']:
-				abilities[advanced_role] = role_abilities
 
 		time.sleep(0.1)
 
@@ -712,7 +1339,7 @@ class Tracker:
 
 					break
 
-		return 0, level, min_level, cards, icons, abilities
+		return 0, level, min_level, cards, icons
 
 	def get_player_clan_xp(self, clan_id, player_id):
 		if not clan_id:
@@ -791,7 +1418,7 @@ class Tracker:
 
 			return data[0]
 
-		level, min_level, cards, icons, abilities = data[1:]
+		level, min_level, cards, icons = data[1:]
 
 		self.PLAYERS[player]['name'] = name
 
@@ -803,7 +1430,6 @@ class Tracker:
 
 		self.write_cards(name, cards)
 		self.write_icons(name, icons)
-		self.write_abilities(name, abilities)
 
 		role = self.PLAYERS[player]['role']
 
@@ -817,7 +1443,6 @@ class Tracker:
 		if not threaded:
 			self.save_cards()
 			self.save_icons()
-			self.save_abilities()
 
 	def set_role(self, player, role):
 		for r in range(len(self.ROTATION)):
@@ -859,6 +1484,8 @@ class Tracker:
 					break
 
 		else:
+			print(self.ROTATION, player, role)
+
 			return 1
 
 		self.PLAYERS[player]['role'] = self.ROTATION[r]['id']
@@ -1112,6 +1739,153 @@ class Tracker:
 
 		return rotation
 
+	def calculate_threats(self):
+		if not self.mastermind or not self.mastermind.profiles:
+			self.THREAT_LEVELS = {}
+
+			return
+
+		state = self.mastermind.state
+		lynch_scores = self.mastermind.calculate_lynch_scores(state)
+		scenarios = self.mastermind.predict(max_depth=2)
+
+		death_probs = {p['name']: 0.0 for p in self.PLAYERS if p.get('name') and not p.get('dead')}
+
+		for scenario in scenarios[:15]:
+			dead_in_this_scenario = set()
+
+			for action in scenario.get('path', [])[:2]:
+				ability_type = action['ability'].get('type', '')
+				
+				if 'kill' in ability_type or 'ignite' in ability_type or 'lynch' in ability_type:
+					target = action.get('target')
+					
+					if not target: continue
+					
+					targets_to_process = [target] if isinstance(target, dict) else list(target)
+					
+					for t in targets_to_process:
+						dead_in_this_scenario.add(t['name'])
+			
+			for dead_player_name in dead_in_this_scenario:
+				if dead_player_name in death_probs:
+					death_probs[dead_player_name] += scenario['prob']
+
+		raw_threats = {}
+		living_players = [p['name'] for p in self.PLAYERS if p.get('name') and not p.get('dead')]
+
+		for name in living_players:
+			social_threat = lynch_scores.get(name, 100)
+
+			death_prob = death_probs.get(name, 0.0)
+			survivability_score = 1.0 - death_prob
+			
+			raw_threats[name] = social_threat * (1 + survivability_score)
+
+		max_threat = max(raw_threats.values()) if raw_threats else 0
+		
+		self.THREAT_LEVELS = {}
+
+		if max_threat > 0:
+			for name, raw_score in raw_threats.items():
+				normalized_threat = (raw_score / max_threat) * 99
+
+				self.THREAT_LEVELS[name] = int(min(100, max(1, normalized_threat)))
+
+	def parse_chat_messages(self, player_messages):
+		claim_patterns = {
+			'role_claim_self': re.compile(r"^(?:i am|im|iam|my role is) ([\w\-]+)"),
+			'player_is_role': re.compile(r"(\d{1,2}) is ([\w\-]+)"),
+			'seer_check': re.compile(r"^(?:seer on|check on) (\d{1,2}) is (good|evil|unknown)"),
+			'doctor_protection': re.compile(r"^(?:doc on|protecting) (\d{1,2})")
+		}
+		
+		unique_claims = {}
+
+		self.PLAYER_ALLIANCES = {}
+
+		for p in self.PLAYERS:
+			if 'contradiction' in p:
+				del p['contradiction']
+
+		for msg_text in player_messages:
+			try:
+				player_num_str, message = msg_text.split(': ', 1)
+				player_name = player_num_str.split(' ', 1)[1]
+			except (ValueError, IndexError):
+				continue
+
+			message_lower = message.lower()
+			
+			for claim_type, pattern in claim_patterns.items():
+				match = pattern.search(message_lower)
+
+				if not match:
+					continue
+
+				if claim_type == 'role_claim_self':
+					claimed_role = match.group(1)
+
+					if player_name not in self.PLAYER_CLAIMS:
+						self.PLAYER_CLAIMS[player_name] = {}
+
+					self.PLAYER_CLAIMS[player_name]['role'] = claimed_role
+
+				elif claim_type == 'player_is_role':
+					target_num, claimed_role = int(match.group(1)) - 1, match.group(2)
+
+					if 0 <= target_num < 16 and self.PLAYERS[target_num]['name']:
+						target_name = self.PLAYERS[target_num]['name']
+
+						if target_name not in self.PLAYER_CLAIMS:
+							self.PLAYER_CLAIMS[target_name] = {}
+
+						self.PLAYER_CLAIMS[target_name]['role'] = claimed_role
+						self.PLAYER_CLAIMS[target_name]['claimed_by'] = player_name
+				
+				elif claim_type == 'seer_check':
+					target_num, aura = int(match.group(1)) - 1, match.group(2).upper()
+
+					if 0 <= target_num < 16 and self.PLAYERS[target_num]['name']:
+						self.PLAYERS[target_num]['aura'] = aura
+
+						if player_name not in self.PLAYER_CLAIMS:
+							self.PLAYER_CLAIMS[player_name] = {}
+
+						if 'seer_checks' not in self.PLAYER_CLAIMS[player_name]:
+							self.PLAYER_CLAIMS[player_name]['seer_checks'] = {}
+
+						self.PLAYER_CLAIMS[player_name]['seer_checks'][target_num + 1] = aura
+
+				elif claim_type == 'doctor_protection':
+					target_num = int(match.group(1)) - 1
+
+					if 0 <= target_num < 16 and self.PLAYERS[target_num]['name']:
+						target_name = self.PLAYERS[target_num]['name']
+
+						if player_name not in self.PLAYER_ALLIANCES:
+							self.PLAYER_ALLIANCES[player_name] = {}
+
+						self.PLAYER_ALLIANCES[player_name][target_name] = self.PLAYER_ALLIANCES[player_name].get(target_name, 0) + 1
+
+		unique_role_ids = {
+			'seer', 'jailer', 'fool', 'arsonist', 'serial-killer', 'mayor', 'alpha-werewolf', 'aura-seer', 'detective'
+		}
+
+		for player_name, claim_data in self.PLAYER_CLAIMS.items():
+			role = claim_data.get('role')
+
+			if role in unique_role_ids:
+				if role in unique_claims:
+					original_claimer_name = unique_claims[role]
+
+					for p in self.PLAYERS:
+						if p['name'] in [player_name, original_claimer_name]:
+							p['contradiction'] = role
+
+				else:
+					unique_claims[role] = player_name
+
 	def update_players(self):
 		updates = 0
 
@@ -1336,7 +2110,7 @@ class Tracker:
 			elif 'привязан' in service_message:
 				player = service_message.split(' был убит ')[0]
 
-			elif 'связал' in service_message:
+			elif 'связал' in service_message and 'Ты' not in service_message:
 				player = service_message.split('Роль ')[1].split(' была ')[0]
 
 			elif 'отравлен' in service_message:
@@ -1364,6 +2138,9 @@ class Tracker:
 				number, name = player.split(' ')
 				number = int(number) - 1
 				dead = False
+
+			elif 'использовал карту гадалки' in service_message:
+				player = service_message.split(' использовал карту гадалки')[0]
 
 			elif 'сбежал из деревни' in service_message:
 				if 'любви' in service_message:
@@ -1406,7 +2183,7 @@ class Tracker:
 					self.set_role(number, role)
 
 		for player_message in player_messages:
-			if 'Приватное' in player_message or 'Личное' in player_message or 'Сбежавший' in player_message:
+			if 'Приватное' in player_message or 'Личное' in player_message or 'Сбежавший' in player_message or 'Для ' in player_message:
 				continue
 
 			player_message = player_message.split(': ', 1)
@@ -1443,6 +2220,12 @@ class Tracker:
 					number = ''
 
 		self.page.evaluate('(players) => localStorage.setItem("players", players)', json.dumps(self.PLAYERS, default=list))
+		
+		if self.mastermind:
+			self.mastermind.update_state()
+			self.calculate_threats()
+
+		self.parse_chat_messages(player_messages)
 
 	def set_players_range(self, number=0, start=0, end=16):
 		for player in self.PLAYER_LAYERS[start:end]:
@@ -1465,10 +2248,9 @@ class Tracker:
 				try:
 					number = 4 * (i - 1) + j - 1
 
-					player_layer_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div[2]/div[2]/div/div[1]/div/div[{i}]/div[{j}]/div')
-					player_base_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[2]/div/div[1]/div/div[{i}]/div[{j}]/div')
-					name_locator = player_base_locator.locator('xpath=/div[1]/div/div[4]/div/div')
-					name = name_locator.text_content(timeout=1000).split(' ')[1]
+					player_layer_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div[1]/div[{i}]/div[{j}]/div')
+					player_base_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div[1]/div[{i}]/div[{j}]/div')
+					name = player_base_locator.text_content(timeout=1000).split(' ')[1]
 
 					self.PLAYER_LAYERS.append({
 						'number': number,
@@ -1502,7 +2284,7 @@ class Tracker:
 	def find_roles(self):
 		print(f'{Style.BRIGHT}{Fore.YELLOW}Finding roles...')
 
-		roles_base_locator = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[1]/div[2]/div')
+		roles_base_locator = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[2]/div')
 
 		rotation_icons = roles_base_locator.evaluate('''
 			(locator) => {
@@ -1579,65 +2361,6 @@ class Tracker:
 
 		return roles
 
-	def finish(self):
-		print(f'{Style.BRIGHT}{Fore.YELLOW}Finishing...')
-
-		for p in range(1, 17):
-			role_icon_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[2]/div/div[3]/div/div/div[{p}]/div/div[1]/div/div/img')
-			number_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div/div/div[2]/div/div[3]/div/div/div[{p}]/div/div[2]')
-
-			try:
-				role_icon = role_icon_locator.evaluate('(locator) => locator.src')
-				number = number_locator.evaluate('(locator) => locator.textContent')
-			except PlaywrightTimeoutError:
-				continue
-
-			if 'roleIcons' in role_icon and 'random' not in role_icon:
-				role_icon = role_icon.split('roleIcons/')[1]
-
-				for icon in self.ICONS:
-					if self.ICONS[icon]['filename'] == role_icon:
-						role = self.ICONS[icon]['role']
-
-						if role == 'cursed-human':
-							role = 'cursed'
-
-						elif role == 'harlot':
-							role = 'red-lady'
-
-						break
-
-			else:
-				role = role_icon.split('icon_')[1].split('_filled')[0]
-				role = role.replace('.svg', '').replace('.png', '')
-				role = role.replace('_', '-')
-
-				if 'cursed' in role:
-					role = 'cursed'
-
-				elif 'harlot' in role:
-					role = 'red-lady'
-
-				elif 'flowedchild' in role:
-					role = 'flower-child'
-
-				elif 'rolechanges' in role:
-					role = 'random-other'
-
-				elif 'kittenwolf' in role:
-					role = 'kitten-wolf'
-
-				elif 'nightmare' in role:
-					role = 'nightmare-werewolf'
-
-				for _ in range(2):
-					if role in self.ROLES:
-						break
-
-					role = role[role.find('-') + 1:]
-
-		print(f'{Style.BRIGHT}{Fore.GREEN}Finished!')
-
 	def prepare(self):
 		self.ROTATION = []
 		self.PLAYERS = []
@@ -1647,9 +2370,12 @@ class Tracker:
 		self.PLAYER_CARDS = {}
 		self.PLAYER_ICONS = {}
 
+		self.THREAT_LEVELS = {}
+		self.PLAYER_CLAIMS = {}
+		self.PLAYER_ALLIANCES = {}
+
 		self.load_cards()
 		self.load_icons()
-		self.load_abilities()
 
 		self.ROLES, self.ADVANCED_ROLES = self.get_roles()
 		self.ICONS = self.get_icons()
@@ -1676,11 +2402,18 @@ class Tracker:
 				'mentions': []
 			})
 
-		self.day_chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div/div').first
-		self.dead_chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[1]/div[3]/div/div/div[2]/div/div/div[1]/div/div/div')
+		self.day_chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div/div').first
+		self.dead_chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div[1]/div')
+
+		self.mastermind = Mastermind(self)
 
 	def monitor(self):
-		banner(self.__class__.__name__)
+		module_name = self.__class__.__name__
+
+		if self.mastermind and self.mastermind.profiles:
+			module_name += f' {Fore.YELLOW}/ with {Fore.RED}Mastermind{Fore.RESET}'
+
+		banner(module_name)
 
 		players_info = ''
 
@@ -1775,12 +2508,27 @@ class Tracker:
 				info += f' {name}'
 
 			if level != -1:
-				info += f' ⭐{level}'
+				info += f' {Fore.YELLOW}⭐{level}{Fore.RESET}'
 
 			elif min_level != -1:
-				info += f' ⭐{min_level}+'
+				info += f' {Fore.YELLOW}⭐{min_level}+{Fore.RESET}'
 
 			info += f' ({len(messages)})'
+
+			player_claim = self.PLAYER_CLAIMS.get(name, {})
+
+			if not player['role']:
+				if player_claim.get('role'):
+					info += f' {Fore.CYAN}C: {player_claim["role"]}{Style.RESET_ALL}'
+				
+				if player.get('contradiction'):
+					role = player['contradiction']
+					info += f' {Back.RED}{Style.BRIGHT}CC: {role}{Style.RESET_ALL}'
+				
+			for protector, targets in self.PLAYER_ALLIANCES.items():
+				for target, count in targets.items():
+					if target == name:
+						info += f' {Fore.BLUE}🛡️ by {protector} (x{count}){Style.RESET_ALL}'
 
 			if player['role']:
 				role = self.ROLES[player['role']]['name']
@@ -1816,6 +2564,19 @@ class Tracker:
 					if p != len(possible) - 1:
 						info += ' / '
 
+			threat = self.THREAT_LEVELS.get(name)
+
+			if threat is not None:
+				threat_color = Fore.GREEN
+
+				if 30 <= threat < 70:
+					threat_color = Fore.YELLOW
+				
+				elif threat >= 70:
+					threat_color = Fore.RED
+				
+				info += f' {threat_color}[{threat}% ❕]{Fore.RESET}'
+
 			if player['aura'] == 'GOOD':
 				info = f'{Back.GREEN}{info}{Back.RESET}'
 
@@ -1826,7 +2587,7 @@ class Tracker:
 				info = f'{Back.CYAN}{info}{Back.RESET}'
 
 			if player['dead']:
-				info = f'\t{Style.DIM}{info}'
+				info = f'\t{Style.DIM}{info}{Style.NORMAL}'
 
 			else:
 				info = f'{Style.BRIGHT}{info}'
@@ -1836,6 +2597,180 @@ class Tracker:
 			players_info += info
 
 		print(f'{Style.BRIGHT}{players_info}{remaining_info}')
+
+	def debug_mastermind(self):
+		print(f'\n{Fore.CYAN}{Style.BRIGHT}--- STARTING MASTERMIND DEBUG ---{Fore.RESET}')
+		
+		mind = self.mastermind
+
+		if not mind or not mind.profiles:
+			print(f'{Back.RED}{Style.BRIGHT}Mastermind is not initialized.{Back.RESET}')
+			
+			return
+
+		mind.update_state()
+		state = mind.state
+
+		print(f'{Style.BRIGHT}Step 1: Initializing simulation state')
+
+		alive_players = [p for p in state.players if not p['dead'] and p['role']]
+		
+		if not alive_players:
+			print(f'{Back.YELLOW}{Fore.BLACK}No living players with known roles found for analysis.{Back.RESET}')
+			
+			return
+
+		print(f'\n{Style.BRIGHT}Step 2: Searching for potentially active players')
+		print(f'  - Found living players with roles: {len(alive_players)}')
+
+		total_actions_found = 0
+
+		for player in alive_players:
+			print(f'\n{Fore.GREEN}--- Analyzing Player: {player["name"]} (Role: {player["role"]}) ---{Fore.RESET}')
+			
+			abilities = mind.profiles.get(player['role'])
+
+			if not abilities:
+				print(f'  - {Back.RED}ERROR:{Back.RESET} Abilities for role "{player["role"]}" not found in role profiles!')
+				
+				continue
+
+			print(f'  - Abilities found in profile: {len(abilities)}')
+
+			for i, ability in enumerate(abilities):
+				ability_type = ability.get('type', 'N/A')
+
+				print(f'	{i + 1}) Ability "{ability_type}":')
+				
+				is_valid = mind.is_ability_valid(player, ability, state)
+
+				if not is_valid:
+					reason = 'max uses exceeded'
+					
+					print(f'	  - {Fore.YELLOW}Validity Check: FAILED (Reason: {reason}){Fore.RESET}')
+					
+					continue
+				
+				print(f'	  - {Fore.GREEN}Validity Check: PASSED{Fore.RESET}')
+
+				targets = mind.get_potential_targets(player, ability.get('targets', {}), state)
+				
+				if not targets:
+					print(f'	  - {Fore.YELLOW}Target Search: No valid targets found.{Fore.RESET}')
+					
+					continue
+				
+				target_names = [t['name'] for t in targets]
+
+				print(f'	  - {Fore.GREEN}Target Search: Found {len(targets)} targets ({", ".join(target_names)}){Fore.RESET}')
+				
+				total_actions_found += len(targets)
+
+		print(f'\n{Style.BRIGHT}--- DEBUG SUMMARY ---{Style.BRIGHT}')
+
+		if total_actions_found > 0:
+			print(f'{Fore.GREEN}Mastermind found {total_actions_found} possible actions.{Fore.RESET}')
+		
+		else:
+			print(f'{Back.YELLOW}{Fore.BLACK}Mastermind found 0 possible actions.{Back.RESET}')
+
+		input()
+
+		return
+
+	def predict(self, player_name):
+		if not self.mastermind or not self.mastermind.profiles:
+			print(f'\n{Back.RED}{Style.BRIGHT}Mastermind is not ready!{Back.RESET}')
+			
+			return
+
+		if not player_name:
+			print(f'\n{Style.BRIGHT}{Fore.YELLOW}Calculating scenarios...{Fore.RESET}')
+
+		else:
+			print(f'\n{Style.BRIGHT}{Fore.YELLOW}Calculating scenarios with focus on {player_name}...{Fore.RESET}')
+
+		self.mastermind.update_state()
+
+		scenarios = self.mastermind.predict(max_depth=3, prob_threshold=0.01, player_name=player_name)
+
+		if not scenarios:
+			print(f'{Style.BRIGHT}{Fore.YELLOW}No viable scenarios found.{Fore.RESET}')
+
+			return
+		
+		print()
+
+		for i, scenario in enumerate(scenarios[:5]):
+			path_parts = []
+
+			if scenario['path']:
+				for action in scenario['path']:
+					actor_name = action['actor']['name']
+					ability = action['ability']
+					ability_desc = ability['description']
+					ability_type = ability.get('type', '')
+					target = action.get('target')
+					
+					desc_color = Fore.WHITE
+					
+					if 'kill' in ability_type or 'lynch' in ability_type or 'ignite' in ability_type:
+						desc_color = Fore.RED
+
+					elif 'protect' in ability_type:
+						desc_color = Fore.BLUE
+
+					elif 'investigate' in ability_type or 'check' in ability_type:
+						desc_color = Fore.CYAN
+
+					target_text = ''
+
+					if target:
+						if isinstance(target, tuple):
+							target_names = f'{Fore.YELLOW}, '.join([t['name'] for t in target])
+							target_text = f' -> ({Fore.YELLOW}{target_names}{Style.RESET_ALL})'
+						
+						else:
+							target_text = f' -> {Fore.YELLOW}{target["name"]}{Style.RESET_ALL}'
+					
+					path_parts.append(f'{Fore.GREEN}{actor_name}{Style.RESET_ALL}({desc_color}{ability_desc}{Style.RESET_ALL}{target_text})')
+			
+			path_text = f' {Fore.WHITE}->{Style.RESET_ALL} '.join(path_parts) if path_parts else f'{Fore.YELLOW}Initial State{Style.RESET_ALL}'
+
+			print(f'{Style.BRIGHT}{Fore.GREEN}Scenario #{i + 1} ({Fore.YELLOW}{scenario["prob"]:.2%}{Fore.GREEN}):{Style.RESET_ALL}{path_text}')
+
+		best_textategy = self.mastermind.optimize_strategy(scenarios)
+
+		if best_textategy['action']:
+			action = best_textategy['action']
+			actor, ability, target = action['actor'], action['ability'], action.get('target')
+
+			desc_color = Fore.WHITE
+			ability_type = ability.get('type', '')
+
+			if 'kill' in ability_type or 'lynch' in ability_type or 'ignite' in ability_type:
+				desc_color = Fore.RED
+
+			elif 'protect' in ability_type:
+				desc_color = Fore.BLUE
+
+			elif 'investigate' in ability_type or 'check' in ability_type:
+				desc_color = Fore.CYAN
+			
+			target_text = ''
+
+			if target:
+				if isinstance(target, tuple):
+					target_names = f'{Fore.YELLOW}, '.join([t['name'] for t in target])
+					target_text = f' -> ({Fore.YELLOW}{target_names}{Style.RESET_ALL})'
+
+				else:
+					target_text = f' -> {Fore.YELLOW}{target["name"]}{Style.RESET_ALL}'
+
+			print(f'\n{Style.BRIGHT}{Fore.GREEN}Recommended Action: {Fore.GREEN}{actor["name"]}{Style.RESET_ALL}({desc_color}{ability["description"]}{Style.RESET_ALL}{target_text})')
+			print(f'{Style.BRIGHT}{Fore.GREEN}Success Probability: {Fore.YELLOW}{best_textategy["expected_success"]*100:.2f}%{Style.RESET_ALL}')
+
+		return
 
 	def process(self):
 		cmd = input(f'\n{Style.BRIGHT}{Fore.RED}>{Fore.RESET} ')
@@ -1924,7 +2859,6 @@ class Tracker:
 				self.PLAYERS[player]['role'] = None
 				self.PLAYERS[player]['team'] = None
 				self.PLAYERS[player]['teams_exclude'] = set()
-				self.PLAYERS[player]['aura'] = None
 				self.PLAYERS[player]['equal'] = set()
 				self.PLAYERS[player]['not_equal'] = set()
 
@@ -1938,6 +2872,24 @@ class Tracker:
 			self.revert(cmd.lower() == 'undo')
 
 			return -1
+
+		elif cmd.lower().startswith('predict'):
+			parts = cmd.lower().split()
+
+			player_name = None
+
+			if len(parts) == 2 and parts[1].isdigit():
+				player = int(parts[1]) - 1
+
+				if 0 <= player < 16 and self.PLAYERS[player]['name']:
+					player_name = self.PLAYERS[player]['name']
+			
+			self.predict(player_name)
+			
+			input()
+
+		elif cmd.lower() == 'debug':
+			self.debug_mastermind()
 
 		else:
 			try:
@@ -1953,8 +2905,10 @@ class Tracker:
 				print(f'{Style.BRIGHT}{Fore.RED}Cursed turned')
 				print(f'{Style.BRIGHT}{Fore.RED}Storm to rediscover')
 				print(f'{Style.BRIGHT}{Fore.RED}Enter to update')
-				print(f'{Style.BRIGHT}{Fore.RED}Undo to cancel role updates')
-				print(f'{Style.BRIGHT}{Fore.RED}Redo to return role updates')
+				print(f'{Style.BRIGHT}{Fore.RED}Undo - cancel changes')
+				print(f'{Style.BRIGHT}{Fore.RED}Redo - return changes')
+				print(f'{Style.BRIGHT}{Fore.RED}Predict - get game scenarios from Mastermind')
+				print(f'{Style.BRIGHT}{Fore.RED}Debug - trace Mastermind analysis')
 				print(f'{Style.BRIGHT}{Fore.RED}End - stop Tracker')
 				input()
 
@@ -1975,7 +2929,6 @@ class Tracker:
 						'width': int(self.CHROME_VIEWPORT[0]),
 						'height': int(self.CHROME_VIEWPORT[1])
 					},
-					executable_path=self.CHROME_EXECUTABLE,
 					headless=False,
 					args=[
 						'--window-position=-7,40',
@@ -2011,7 +2964,7 @@ class Tracker:
 
 					while True:
 						try:
-							night_chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[1]/div[3]/div/div[1]/div[1]/div/div[1]')
+							night_chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div[1]/div[1]/div/div[1]')
 
 							if night_chat.text_content(timeout=1000) == 'Дневной чат':
 								break
@@ -2071,19 +3024,7 @@ class Booster:
 			os.abort()
 
 		try:
-			self.CHROME_EXECUTABLE = self.config['CHROME_EXECUTABLE']
-		except KeyError:
-			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome not found!{Back.RESET}')
-
-			os.abort()
-
-		if not os.path.isfile(self.CHROME_EXECUTABLE):
-			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome is invalid!{Back.RESET}')
-
-			os.abort()
-
-		try:
-			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Upuaut')
+			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Upuaut2')
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome User Data not found!{Back.RESET}')
 
@@ -2131,8 +3072,8 @@ class Booster:
 				try:
 					time.sleep(0.1)
 
-					player_base_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[2]/div/div[1]/div/div[{i}]/div[{j}]/div')
-					player_img_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[2]/div/div[1]/div/div[{i}]/div[{j}]/div')
+					player_base_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div/div[{i}]/div[{j}]/div')
+					player_img_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div/div[{i}]/div[{j}]/div')
 
 					name = player_base_locator.text_content(timeout=1000).split(' ')[1]
 					icons = player_img_locator.evaluate('''
@@ -2191,7 +3132,7 @@ class Booster:
 
 		print(f'{Style.BRIGHT}{Fore.GREEN}Players found!')
 
-		textarea = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[1]/div[3]/div/div[2]/div/div[2]/div/textarea')
+		textarea = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div[2]/div/div[2]/div/textarea')
 
 		print(f'{Style.BRIGHT}{Fore.YELLOW}Sending message...')
 
@@ -2226,7 +3167,7 @@ class Booster:
 			if remaining_time >= 10:
 				time.sleep(remaining_time - 10)
 
-			chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[1]/div[3]/div/div[2]/div/div[1]/div/div/div')
+			chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div[2]/div/div[1]/div/div/div')
 
 			messages = chat.evaluate('''
 				(chat) => {
@@ -2273,7 +3214,7 @@ class Booster:
 			if target:
 				print(f'{Style.BRIGHT}{Fore.YELLOW}Tagging player...')
 			
-				self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[2]/div/div[2]/div/div/div[1]/div/div/div/img').click(timeout=10000)
+				self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[2]/div/div/div[1]/div/div/div/img').click(timeout=10000)
 
 				time.sleep(1)
 
@@ -2305,7 +3246,7 @@ class Booster:
 
 			while True:
 				try:
-					night_chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div[1]/div/div[1]/div[1]/div[2]/div[1]/div[3]/div/div[1]/div[3]/div/div[1]')
+					night_chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div[1]/div[3]/div/div[1]')
 
 					if night_chat.text_content(timeout=1000) == 'Чат оборотней':
 						werewolf = True
@@ -2315,11 +3256,11 @@ class Booster:
 					break
 				except PlaywrightTimeoutError:
 					try:
-						create_game_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div[1]/div[1]/div/div/div/div/div/div/div[2]/div[2]/div[2]/div[1]/div/div/div')
+						create_game_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div[1]/div[1]/div/div[3]/div/div/div/div/div[2]/div[2]/div[2]/div[1]/div/div/div')
 						
 						if create_game_button.text_content(timeout=1000) == 'СОЗДАТЬ ИГРУ':
 							try:
-								close_popup_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[3]/div/div/div[2]/div/div/div')
+								close_popup_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div')
 								
 								if close_popup_button.text_content(timeout=1000) == 'Окей':
 									close_popup_button.click()
@@ -2329,7 +3270,7 @@ class Booster:
 							break
 					except PlaywrightTimeoutError:
 						try:
-							start_game_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div[2]/div[4]/div[2]/div/div/div')
+							start_game_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div[1]/div[2]/div[4]/div[2]/div/div/div')
 
 							if start_game_button.text_content(timeout=1000) == 'НАЧАТЬ ИГРУ':
 								start_game_button.click()
@@ -2351,7 +3292,7 @@ class Booster:
 
 			while True:
 				try:
-					continue_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div[2]/div[2]/div/div[1]/div').get_by_text('Продолжить')
+					continue_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div/div[20]/div/div/div[4]/div/div/div').get_by_text('Продолжить')
 					continue_button.click(timeout=30000)
 
 					break
@@ -2362,11 +3303,11 @@ class Booster:
 			print(f'{Style.BRIGHT}{Fore.YELLOW}Exiting...')
 
 			try:
-				play_again_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div[2]/div/div/div/div/div[1]/div[2]/div[2]/div[3]/div[5]/div[2]/div/div[2]').get_by_text('Играть снова')
+				play_again_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div[2]/div/div/div/div/div/div[1]/div[1]/div[2]/div[2]/div[3]/div[5]/div[2]/div/div[2]').get_by_text('Играть снова')
 				play_again_button.click(timeout=30000)
 
 				try:
-					host_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[3]/div/div[2]/div[3]/div[2]/div/div')
+					host_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[3]/div[2]/div/div')
 					
 					if host_button.text_content(timeout=1000) == 'Окей':
 						host_button.click()
@@ -2376,7 +3317,7 @@ class Booster:
 				playsound('audio/glitch.mp3')
 
 				try:
-					close_popup_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[3]/div/div/div[2]/div/div/div')
+					close_popup_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div')
 					
 					if close_popup_button.text_content(timeout=1000) == 'Окей':
 						close_popup_button.click()
@@ -2398,7 +3339,6 @@ class Booster:
 						'width': int(self.CHROME_VIEWPORT[0]),
 						'height': int(self.CHROME_VIEWPORT[1])
 					},
-					executable_path=self.CHROME_EXECUTABLE,
 					headless=False,
 					args=[
 						'--window-position=-7,40',
@@ -2458,7 +3398,7 @@ class Booster:
 					self.play()
 		except KeyboardInterrupt:
 			return
-		except Exception as e:
+		except KeyboardInterrupt as e:
 			input(f'\n{Style.BRIGHT}{Back.RED}Browser closed!{Back.RESET}')
 
 			return
@@ -2472,18 +3412,6 @@ class Stalker:
 			self.API_KEYS = self.config['STALKER_API_KEYS'].split(',')
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}API key(s) not found!{Back.RESET}')
-
-			os.abort()
-
-		try:
-			self.CHROME_EXECUTABLE = self.config['CHROME_EXECUTABLE']
-		except KeyError:
-			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome not found!{Back.RESET}')
-
-			os.abort()
-
-		if not os.path.isfile(self.CHROME_EXECUTABLE):
-			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome is invalid!{Back.RESET}')
 
 			os.abort()
 
@@ -2912,6 +3840,9 @@ class Stalker:
 				clan = clan[1]
 				clan.update(clan.pop('members').get(player_id, {}))
 
+			else:
+				clan = {}
+
 		player_data = {
 			'id': player_id,
 			'name': name,
@@ -3257,7 +4188,6 @@ class Stalker:
 						'width': int(self.CHROME_VIEWPORT[0]),
 						'height': int(self.CHROME_VIEWPORT[1])
 					},
-					executable_path=self.CHROME_EXECUTABLE,
 					args=[
 						'--window-position=-7,40',
 						'--mute-audio',
@@ -3288,7 +4218,7 @@ class Stalker:
 						break
 		except KeyboardInterrupt:
 			return
-		except Exception as e:
+		except KeyboardInterrupt as e:
 			input(f'\n{Style.BRIGHT}{Back.RED}{str(e)}{Back.RESET}')
 
 			return
@@ -3380,7 +4310,7 @@ class Spinner:
 
 				print(f'{Style.BRIGHT}{Fore.YELLOW}Watching ad...')
 
-				time.sleep(60)
+				time.sleep(120)
 
 				self.app[self.BLUESTACKS5_NAME].Button0.click()
 
@@ -3458,6 +4388,7 @@ class Spinner:
 			self.kill()
 
 			return
+
 
 def banner(module=None):
 	os.system('cls' if os.name == 'nt' else 'clear')
