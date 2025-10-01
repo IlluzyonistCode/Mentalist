@@ -3024,7 +3024,7 @@ class Booster:
 			os.abort()
 
 		try:
-			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Upuaut2')
+			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Upuaut')
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome User Data not found!{Back.RESET}')
 
@@ -3292,8 +3292,8 @@ class Booster:
 
 			while True:
 				try:
-					continue_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div/div[20]/div/div/div[4]/div/div/div').get_by_text('Продолжить')
-					continue_button.click(timeout=30000)
+					continue_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div/div[22]/div/div/div[4]/div/div')
+					continue_button.click(timeout=120000)
 
 					break
 				except PlaywrightTimeoutError:
