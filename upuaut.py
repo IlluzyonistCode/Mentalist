@@ -3584,45 +3584,48 @@ class Stalker:
 			return
 
 	def add_changes(self, prev_target, target, diff, current_time, clan=False):
-		if not os.path.isdir('targets'):
-			os.mkdir('targets')
+			if not os.path.isdir('targets'):
+				os.mkdir('targets')
 
-		target_id = target['id']
+			target_id = target['id']
 
-		if clan:
-			target = target['clan']
-			prev_target = prev_target['clan']
+			if clan:
+				target = target['clan']
+				prev_target = prev_target['clan']
 
-		if diff:
-			with open(f'targets/{target_id}.txt', 'a', encoding='utf-8') as f:
-				f.write(f'{current_time}\n\n')
+			if diff:
+				with open(f'targets/{target_id}.txt', 'a', encoding='utf-8') as f:
+					f.write(f'{current_time}\n\n')
 
-				if not target:
-					f.write('Left the clan!\n\n')
+					if not target:
+						f.write('Left the clan!\n\n')
 
-					return
+						return
 
-				for d in diff:
-					if not target[d] or target[d] == -1:
-						target[d] = 'HIDDEN'
+					for d in diff:
+						new_val = target.get(d)
+						prev_val = prev_target.get(d)
 
-					if not prev_target[d] or prev_target[d] == -1:
-						prev_target[d] = 'HIDDEN'
+						if not new_val or new_val == -1:
+							new_val = 'HIDDEN'
 
-					if target[d] == prev_target[d]:
-						continue
+						if not prev_val or prev_val == -1:
+							prev_val = 'HIDDEN'
 
-					field = 'Clan ' if clan else ''
-					field += d.replace('_', ' ').capitalize()
+						if new_val == prev_val:
+							continue
 
-					prev_value = prev_target[d]
-					value = target[d]
+						field = 'Clan ' if clan else ''
+						field += d.replace('_', ' ').capitalize()
 
-					change_info = f'{field}: {prev_value} -> {value}\n'
+						prev_value = prev_val
+						value = new_val
 
-					f.write(change_info)
+						change_info = f'{field}: {prev_value} -> {value}\n'
 
-				f.write('\n')
+						f.write(change_info)
+
+					f.write('\n')
 
 	def auto_update(self):
 		while True:
