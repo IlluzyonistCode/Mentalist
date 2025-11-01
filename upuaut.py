@@ -79,7 +79,6 @@ class Mastermind:
 	def initialize_special_roles(self, state):
 		pass
 
-
 	def get_role_strategic_value(self, role_id):
 		if not role_id:
 			return 5
@@ -1937,6 +1936,9 @@ class Tracker:
 			name = None
 			role = None
 			dead = True
+
+			if 'монстра' in service_message:
+				continue
 
 			if 'убил' in service_message:
 				if 'дождь' in service_message:
