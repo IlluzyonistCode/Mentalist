@@ -700,8 +700,15 @@ class Tracker:
 
 			os.abort()
 
+		self.CHROME_EXECUTABLE = self.config.get('CHROME_EXECUTABLE')
+
+		if self.CHROME_EXECUTABLE is not None and not os.path.isfile(self.CHROME_EXECUTABLE):
+			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome Executable is invalid!{Back.RESET}')
+
+			os.abort()
+
 		try:
-			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Upuaut')
+			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Mentalist')
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome User Data not found!{Back.RESET}')
 
@@ -2926,6 +2933,7 @@ class Tracker:
 				print(f'{Style.BRIGHT}{Fore.YELLOW}Opening website...')
 
 				context = playwright.chromium.launch_persistent_context(
+					executable_path=self.CHROME_EXECUTABLE,
 					user_data_dir=self.CHROME_USER_DATA,
 					viewport={
 						'width': int(self.CHROME_VIEWPORT[0]),
@@ -3025,8 +3033,15 @@ class Booster:
 
 			os.abort()
 
+		self.CHROME_EXECUTABLE = self.config.get('CHROME_EXECUTABLE')
+
+		if self.CHROME_EXECUTABLE is not None and not os.path.isfile(self.CHROME_EXECUTABLE):
+			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome Executable is invalid!{Back.RESET}')
+
+			os.abort()
+
 		try:
-			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Upuaut')
+			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Mentalist')
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome User Data not found!{Back.RESET}')
 
@@ -3336,6 +3351,7 @@ class Booster:
 				print(f'{Style.BRIGHT}{Fore.YELLOW}Opening website...')
 
 				context = playwright.chromium.launch_persistent_context(
+					executable_path=self.CHROME_EXECUTABLE,
 					user_data_dir=self.CHROME_USER_DATA,
 					viewport={
 						'width': int(self.CHROME_VIEWPORT[0]),
@@ -3417,8 +3433,15 @@ class Stalker:
 
 			os.abort()
 
+		self.CHROME_EXECUTABLE = self.config.get('CHROME_EXECUTABLE')
+
+		if self.CHROME_EXECUTABLE is not None and not os.path.isfile(self.CHROME_EXECUTABLE):
+			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome Executable is invalid!{Back.RESET}')
+
+			os.abort()
+
 		try:
-			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Upuaut')
+			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Mentalist')
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome User Data not found!{Back.RESET}')
 
@@ -4188,6 +4211,7 @@ class Stalker:
 				print(f'{Style.BRIGHT}{Fore.YELLOW}Opening website...')
 
 				context = playwright.chromium.launch_persistent_context(
+					executable_path=self.CHROME_EXECUTABLE,
 					user_data_dir=self.CHROME_USER_DATA,
 					viewport={
 						'width': int(self.CHROME_VIEWPORT[0]),
