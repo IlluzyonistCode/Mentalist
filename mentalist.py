@@ -692,44 +692,57 @@ class Mastermind:
 class Tracker:
 	def __init__(self):
 		self.config = dotenv_values('.env')
+		self.is_valid = True
 
 		try:
 			self.API_KEYS = self.config['TRACKER_API_KEYS'].split(',')
 		except KeyError:
-			input(f'{Style.BRIGHT}{Back.RED}API key(s) not found!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Tracker Error: API key(s) not found!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		self.CHROME_EXECUTABLE = self.config.get('CHROME_EXECUTABLE')
 
 		if self.CHROME_EXECUTABLE is not None and not os.path.isfile(self.CHROME_EXECUTABLE):
-			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome Executable is invalid!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Tracker Error: Path to Chrome Executable is invalid!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		try:
 			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Mentalist')
 		except KeyError:
-			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome User Data not found!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Tracker Error: Path to Chrome User Data not found!{Back.RESET}')
+			
+			self.is_valid = False
 
-			os.abort()
+			return
 
 		if not os.path.isdir(self.CHROME_USER_DATA):
-			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome User Data is invalid!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Tracker Error: Path to Chrome User Data is invalid!{Back.RESET}')
+			
+			self.is_valid = False
 
-			os.abort()
+			return
 
 		try:
 			self.CHROME_VIEWPORT = self.config['CHROME_VIEWPORT'].split(',')
 		except KeyError:
-			input(f'{Style.BRIGHT}{Back.RED}Browser Viewport not found!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Tracker Error: Browser Viewport not found!{Back.RESET}')
+			
+			self.is_valid = False
 
-			os.abort()
+			return
 
 		if len(self.CHROME_VIEWPORT) != 2:
-			input(f'{Style.BRIGHT}{Back.RED}Browser Viewport is invalid!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Tracker Error: Browser Viewport is invalid!{Back.RESET}')
+			
+			self.is_valid = False
 
-			os.abort()
+			return
 
 		self.API_KEY = self.switch_api_key()
 
@@ -3025,44 +3038,57 @@ class Tracker:
 class Booster:
 	def __init__(self):
 		self.config = dotenv_values('.env')
+		self.is_valid = True
 
 		try:
 			self.PLAYER_NAME = self.config['PLAYER_NAME']
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Player Name not found!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		self.CHROME_EXECUTABLE = self.config.get('CHROME_EXECUTABLE')
 
 		if self.CHROME_EXECUTABLE is not None and not os.path.isfile(self.CHROME_EXECUTABLE):
 			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome Executable is invalid!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		try:
 			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Mentalist')
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome User Data not found!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		if not os.path.isdir(self.CHROME_USER_DATA):
 			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome User Data is invalid!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		try:
 			self.CHROME_VIEWPORT = self.config['CHROME_VIEWPORT'].split(',')
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Browser Viewport not found!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		if len(self.CHROME_VIEWPORT) != 2:
 			input(f'{Style.BRIGHT}{Back.RED}Browser Viewport is invalid!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		self.page = None
 
@@ -3425,58 +3451,75 @@ class Booster:
 class Stalker:
 	def __init__(self):
 		self.config = dotenv_values('.env')
+		self.is_valid = True
 
 		try:
 			self.API_KEYS = self.config['STALKER_API_KEYS'].split(',')
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}API key(s) not found!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		self.CHROME_EXECUTABLE = self.config.get('CHROME_EXECUTABLE')
 
 		if self.CHROME_EXECUTABLE is not None and not os.path.isfile(self.CHROME_EXECUTABLE):
 			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome Executable is invalid!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		try:
 			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Mentalist')
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome User Data not found!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		if not os.path.isdir(self.CHROME_USER_DATA):
 			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome User Data is invalid!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		try:
 			self.CHROME_VIEWPORT = self.config['CHROME_VIEWPORT'].split(',')
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Browser Viewport not found!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		if len(self.CHROME_VIEWPORT) != 2:
 			input(f'{Style.BRIGHT}{Back.RED}Browser Viewport is invalid!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		try:
 			TIMEZONE = self.config['TIMEZONE']
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Timezone not found!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		try:
 			self.TIMEZONE = pytz.timezone(TIMEZONE)
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Timezone is invalid!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		self.ntp = ntplib.NTPClient()
 		self.NTP_SERVER = 'time.google.com'
@@ -4256,27 +4299,33 @@ class Stalker:
 class Spinner:
 	def __init__(self):
 		self.config = dotenv_values('.env')
+		self.is_valid = True
+		self.app = None
 
 		try:
 			self.BLUESTACKS5_EXECUTABLE = self.config['BLUESTACKS5_EXECUTABLE']
 		except KeyError:
-			input(f'{Style.BRIGHT}{Back.RED}Path to BlueStacks 5 not found!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Spinner Error: Path to BlueStacks 5 not found!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		if not os.path.isfile(self.BLUESTACKS5_EXECUTABLE):
-			input(f'{Style.BRIGHT}{Back.RED}Path to BlueStacks 5 is invalid!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Spinner Error: Path to BlueStacks 5 is invalid!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
+
+			return
 
 		try:
 			self.BLUESTACKS5_NAME = self.config['BLUESTACKS5_NAME']
 		except KeyError:
-			input(f'{Style.BRIGHT}{Back.RED}Name of BlueStacks 5 not found!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Spinner Error: Name of BlueStacks 5 not found!{Back.RESET}')
 
-			os.abort()
+			self.is_valid = False
 
-		self.app = None
+			return
 
 	@staticmethod
 	def wait(filename, confidence=0.9, check_fail=False, check_count=6, click=True):
@@ -4422,7 +4471,7 @@ class Spinner:
 def banner(module=None):
 	os.system('cls' if os.name == 'nt' else 'clear')
 
-	message = f'{Style.BRIGHT}{Fore.RED}Upu{Fore.YELLOW}aut{Fore.RESET}'
+	message = f'{Style.BRIGHT}{Fore.RED}Men{Fore.YELLOW}tal{Fore.WHITE}ist{Fore.RESET}'
 
 	if module:
 		message += f'{Fore.RED} | {module}'
@@ -4436,22 +4485,47 @@ try:
 	while True:
 		banner()
 
-		modules = [Tracker(), Booster(), Stalker()]
+		module_classes = [Tracker, Booster, Stalker]
 
 		if os.name == 'nt':
-			modules.append(Spinner())
+			module_classes.append(Spinner)
 
-		module = None
+		modules = []
+		disabled_modules = []
+
+		for module_class in module_classes:
+			instance = module_class()
+
+			if instance.is_valid:
+				modules.append(instance)
+			
+			else:
+				disabled_modules.append(module_class.__name__)
+
+		print()
 
 		for i, module in enumerate(modules):
-			module = module.__class__.__name__
+			module_name = module.__class__.__name__
 
-			print(f'{Style.BRIGHT}{Fore.GREEN}{i + 1}. {Fore.RESET}{Back.GREEN}{module}')
+			print(f'{Style.BRIGHT}{Fore.GREEN}{i + 1}. {Fore.RESET}{Back.GREEN}{module_name}')
+		
+		if disabled_modules:
+			print()
+
+			for module_name in disabled_modules:
+				print(f'{Style.BRIGHT}{Fore.RED}Module {module_name} is disabled due to configuration errors.{Fore.RESET}')
+
+		if not modules:
+			print(f'\n{Style.BRIGHT}{Back.RED}All modules failed to load! Check your .env file.{Back.RESET}')
+			
+			input('Press Enter to exit.')
+
+			break
 
 		while True:
 			choice = input(f'\n{Style.BRIGHT}{Fore.YELLOW}Module to run:{Fore.RESET} ')
 
-			if choice.isdigit() and 1 <= int(choice) <= i + 1:
+			if choice.isdigit() and 1 <= int(choice) <= len(modules):
 				module = modules[int(choice) - 1]
 
 				break
