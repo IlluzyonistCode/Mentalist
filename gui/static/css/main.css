@@ -8,6 +8,23 @@ body {
     color: #333;
 }
 
+/* Colorama styles for console output */
+.console-output .console-red-bright { color: #ff0000; font-weight: bold; }
+.console-output .console-yellow-bright { color: #ffff00; font-weight: bold; }
+.console-output .console-green-bright { color: #00ff00; font-weight: bold; }
+.console-output .console-cyan-bright { color: #00ffff; font-weight: bold; }
+.console-output .console-blue-bright { color: #0000ff; font-weight: bold; }
+.console-output .console-magenta-bright { color: #ff00ff; font-weight: bold; }
+.console-output .console-white-bright { color: #ffffff; font-weight: bold; }
+.console-output .console-dim { opacity: 0.6; }
+
+.console-output .console-bg-red { background-color: #ff0000; color: #ffffff; }
+.console-output .console-bg-green { background-color: #00ff00; color: #000000; }
+.console-output .console-bg-yellow { background-color: #ffff00; color: #000000; }
+.console-output .console-bg-cyan { background-color: #00ffff; color: #000000; }
+
+.console-output .console-banner { font-size: 1.2em; font-weight: bold; }
+
 .container {
     width: 90%;
     max-width: 1200px;
