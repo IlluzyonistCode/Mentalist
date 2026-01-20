@@ -7359,9 +7359,9 @@ class Tracker(MentalistModule): # Tracker теперь наследуется о
 					self._print_output(f"Error closing playwright context: {e}")
 			self.status = "Остановлен"
 
-    def run(self):
-        # The run method now simply starts the thread
-        self.start()
+	def run(self):
+		# The run method now simply starts the thread
+		self.start()
 
 # Остальные классы (Booster, Stalker, Spinner) будут адаптированы аналогично
 # Их реализация будет добавлена в следующих блоках.
