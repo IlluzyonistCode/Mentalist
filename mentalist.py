@@ -30,6 +30,7 @@ from functools import lru_cache
 from playsound import playsound
 from colorama import Back, Fore, Style, init
 from datetime import datetime, timedelta
+import sys # Добавлен импорт sys
 from dotenv import dotenv_values
 
 init(autoreset=True)
@@ -617,7 +618,7 @@ class Mastermind:
 				lover_player['dead'] = True
 
 				self.check_lover_deaths(state, dead_player=lover_player)
-				self.check_vengeance_deaths(state, dead_player=target)
+				self.check_vengeance_deaths(state, dead_player=lover_player) # Исправлено: target на lover_player
 
 	def process_pending_effects(self, state):
 		remaining_effects = []
@@ -2454,7 +2455,7 @@ class Tracker:
 			threading.Thread(target=self.set_players_range, args=(2, 8, 16), daemon=True).start()
 
 		else:
-			find_players_range()
+			self.set_players_range() # Исправлено: find_players_range() на self.set_players_range()
 
 		while not all(self.DISCOVERED):
 			time.sleep(1)
