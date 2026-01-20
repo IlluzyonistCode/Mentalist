@@ -1,0 +1,64 @@
+{% extends "layout.html" %}
+
+{% block title %}Доступные модули{% endblock %}
+
+{% block content %}
+    <h2>Доступные модули</h2>
+    <div class="module-list">
+        {% for module_name, module_info in modules.items() %}
+        <div class="module-card">
+            <h3>{{ module_name }}</h3>
+            <p>Статус: <span id="status-{{ module_name }}">{{ module_info.status }}</span></p>
+            <div class="module-actions">
+                <button class="btn btn-start" data-module="{{ module_name }}" {% if module_info.is_running %}disabled{% endif %}>Запустить</button>
+                <button class="btn btn-stop" data-module="{{ module_name }}" {% if not module_info.is_running %}disabled{% endif %}>Остановить</button>
+                <a href="{{ url_for('module_detail', module_name=module_name) }}" class="btn btn-view">Подробнее</a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.btn-start').forEach(button => {
+            button.addEventListener('click', function() {
+                const moduleName = this.dataset.module;
+                fetch(`/api/start/${moduleName}`, { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert(`${moduleName} запущен.`);
+                            document.getElementById(`status-${moduleName}`).textContent = 'Запущен';
+                            this.disabled = true;
+                            document.querySelector(`.btn-stop[data-module="${moduleName}"]`).disabled = false;
+                        } else {
+                            alert(`Ошибка при запуске ${moduleName}: ${data.message}`);
+                        }
+                    })
+                    .catch(error => console.error('Error starting module:', error));
+            });
+        });
+
+        document.querySelectorAll('.btn-stop').forEach(button => {
+            button.addEventListener('click', function() {
+                const moduleName = this.dataset.module;
+                fetch(`/api/stop/${moduleName}`, { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert(`${moduleName} остановлен.`);
+                            document.getElementById(`status-${moduleName}`).textContent = 'Остановлен';
+                            this.disabled = true;
+                            document.querySelector(`.btn-start[data-module="${moduleName}"]`).disabled = false;
+                        } else {
+                            alert(`Ошибка при остановке ${moduleName}: ${data.message}`);
+                        }
+                    })
+                    .catch(error => console.error('Error stopping module:', error));
+            });
+        });
+    });
+</script>
+{% endblock %}
