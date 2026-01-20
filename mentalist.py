@@ -1,5 +1,10 @@
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.figure_factory as ff
 import requests
 import threading
+import hashlib
 import pyautogui
 import pywinauto
 import pygetwindow
@@ -15,12 +20,14 @@ import pytz
 import time
 import random
 from undetected_playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from plotly.subplots import make_subplots
 from collections import OrderedDict
 from copy import deepcopy
 from itertools import combinations
 from functools import lru_cache
 from playsound import playsound
 from colorama import Back, Fore, Style, init
+from datetime import datetime, timedelta
 from dotenv import dotenv_values
 
 init(autoreset=True)
@@ -63,13 +70,38 @@ class Mastermind:
 		self.update_state()
 
 	def load_profiles(self, filename='role_profiles.json'):
+		local_profiles = {}
+		
 		try:
 			with open(filename, 'r', encoding='utf-8') as f:
-				return json.load(f)
+				local_profiles = json.load(f)
 		except FileNotFoundError:
-			print(f'{Style.BRIGHT}{Back.RED}Role profiles not found!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.YELLOW}Local role profiles not found. Trying Mentalist Server...{Back.RESET}')
+		
+		if self.tracker.SERVER_ENABLED:
+			success, server_profiles = self.tracker.sync_with_server(
+				'role_profiles',
+				local_profiles,
+				bidirectional=False
+			)
+			
+			if success and server_profiles:
+				try:
+					with open(filename, 'w', encoding='utf-8') as f:
+						json.dump(server_profiles, f, ensure_ascii=False, indent=2)
 
-			return {}
+					print(f'{Style.BRIGHT}{Fore.GREEN}Role profiles synced from Mentalist Server!{Fore.RESET}')
+					
+					return server_profiles
+				except Exception as e:
+					print(f'{Style.BRIGHT}{Fore.YELLOW}Could not save profiles: {e}{Fore.RESET}')
+
+					return server_profiles
+		
+		if not local_profiles:
+			print(f'{Style.BRIGHT}{Back.RED}Role profiles not found!{Back.RESET}')
+		
+		return local_profiles
 
 	def update_state(self):
 		self.state = GameState(self.tracker)
@@ -746,6 +778,17 @@ class Tracker:
 
 		self.API_KEY = self.switch_api_key()
 
+		self.SERVER_ENABLED = self.config.get('SYNC_SERVER_ENABLED', 'false').lower() == 'true'
+		self.SERVER_URL = self.config.get('SYNC_SERVER_URL', 'http://localhost:1101')
+		self.SERVER_API_KEY = self.config.get('SYNC_SERVER_API_KEY', '')
+		self.SERVER_TIMEOUT = 10
+
+		self.data_hashes = {
+			'cards': None,
+			'icons': None,
+			'role_profiles': None
+		}
+
 		self.ASSET_PATHS = {
 			'see': {
 				'html': 'main.html',
@@ -891,7 +934,100 @@ class Tracker:
 		while True:
 			for key in self.API_KEYS:
 				yield key
+
+	def calculate_hash(self, data):
+		json_str = json.dumps(data, sort_keys=True)
+
+		return hashlib.sha256(json_str.encode()).hexdigest()
+	
+	def sync_with_server(self, data_type, local_data, bidirectional=True):
+		if not self.SERVER_ENABLED:
+			return False, local_data
 		
+		try:
+			current_hash = self.calculate_hash(local_data)
+			
+			if self.data_hashes.get(data_type) == current_hash:
+				return True, local_data
+			
+			headers = {
+				'X-API-Key': self.SERVER_API_KEY,
+				'Content-Type': 'application/json'
+			}
+			
+			if bidirectional:
+				endpoint = f'{self.SERVER_URL}/sync/{data_type}'
+				payload = {
+					'data': local_data,
+					'hash': current_hash
+				}
+				
+				response = requests.post(
+					endpoint,
+					json=payload,
+					headers=headers,
+					timeout=self.SERVER_TIMEOUT,
+					verify=False
+				)
+			else:
+				endpoint = f'{self.SERVER_URL}/get/{data_type}'
+				response = requests.get(
+					endpoint,
+					headers=headers,
+					timeout=self.SERVER_TIMEOUT,
+					verify=False
+				)
+			
+			if response.status_code == 200:
+				result = response.json()
+				
+				if result.get('status') == 'no_changes':
+					self.data_hashes[data_type] = current_hash
+
+					return True, local_data
+				
+				elif result.get('status') in ['synced', 'success']
+					server_data = result.get('data', {})
+					server_hash = result.get('hash', '')
+					
+					self.data_hashes[data_type] = server_hash
+					
+					if bidirectional and result.get('server_updated'):
+						print(f'{Style.BRIGHT}{Fore.GREEN}Mentalist Server updated with your {data_type}!')
+					
+					if server_hash != current_hash:
+						print(f'{Style.BRIGHT}{Fore.CYAN}Received updates for {data_type} from Mentalist Server.')
+						
+						return True, server_data
+					
+					return True, local_data
+			
+			elif response.status_code == 401:
+				print(f'{Style.BRIGHT}{Back.RED}Mentalist Server sync failed: Invalid API key{Back.RESET}')
+
+				return False, local_data
+			
+			else:
+				print(f'{Style.BRIGHT}{Fore.YELLOW}Server sync warning: {response.status_code}')
+
+				return False, local_data
+		
+		except requests.exceptions.ConnectionError:
+			if not hasattr(self, '_server_warning_shown'):
+				print(f'{Style.BRIGHT}{Fore.YELLOW}Warning: Cannot connect to Mentalist Server. Using local data.{Fore.RESET}')
+
+				self._server_warning_shown = True
+
+			return False, local_data
+		except requests.exceptions.Timeout:
+			print(f'{Style.BRIGHT}{Fore.YELLOW}Mentalist Server sync timeout. Using local data.{Fore.RESET}')
+
+			return False, local_data
+		except Exception as e:
+			print(f'{Style.BRIGHT}{Fore.RED}Mentalist Server sync error: {e}{Fore.RESET}')
+
+			return False, local_data
+
 	def load_assets(self):
 		try:
 			for asset in self.ASSET_PATHS:
@@ -1048,10 +1184,15 @@ class Tracker:
 	def load_cards(self):
 		try:
 			with open('data/cards.json', 'r') as cards_file:
-				self.PLAYER_CARDS = json.load(cards_file)
+				local_cards = json.load(cards_file)
 		except:
-			self.PLAYER_CARDS = {}
-
+			local_cards = {}
+		
+		success, self.PLAYER_CARDS = self.sync_with_server('cards', local_cards, bidirectional=True)
+		
+		if success and self.PLAYER_CARDS != local_cards:
+			self.save_cards()
+	
 	def write_cards(self, player, cards):
 		if player not in self.PLAYER_CARDS:
 			self.PLAYER_CARDS[player] = cards
@@ -1072,17 +1213,29 @@ class Tracker:
 	def save_cards(self):
 		if not os.path.isdir('data'):
 			os.mkdir('data')
-
+		
 		with open('data/cards.json', 'w') as cards_file:
 			json.dump(self.PLAYER_CARDS, cards_file)
+		
+		if self.SERVER_ENABLED:
+			threading.Thread(
+				target=self.sync_with_server,
+				args=('cards', self.PLAYER_CARDS, True),
+				daemon=True
+			).start()
 
 	def load_icons(self):
 		try:
 			with open('data/icons.json', 'r') as icons_file:
-				self.PLAYER_ICONS = json.load(icons_file)
+				local_icons = json.load(icons_file)
 		except:
-			self.PLAYER_ICONS = {}
-
+			local_icons = {}
+		
+		success, self.PLAYER_ICONS = self.sync_with_server('icons', local_icons, bidirectional=True)
+		
+		if success and self.PLAYER_ICONS != local_icons:
+			self.save_icons()
+	
 	def write_icons(self, player, icons):
 		if player not in self.PLAYER_ICONS:
 			self.PLAYER_ICONS[player] = icons
@@ -1093,9 +1246,16 @@ class Tracker:
 	def save_icons(self):
 		if not os.path.isdir('data'):
 			os.mkdir('data')
-
+		
 		with open('data/icons.json', 'w') as icons_file:
 			json.dump(self.PLAYER_ICONS, icons_file)
+		
+		if self.SERVER_ENABLED:
+			threading.Thread(
+				target=self.sync_with_server,
+				args=('icons', self.PLAYER_ICONS, True),
+				daemon=True
+			).start()
 
 	def get_roles(self):
 		print(f'{Style.BRIGHT}{Fore.YELLOW}Getting roles...')
@@ -3029,7 +3189,7 @@ class Tracker:
 							self.update_players()
 		except KeyboardInterrupt:
 			return
-		except KeyboardInterrupt as e:
+		except Exception as e:
 			input(f'\n{Style.BRIGHT}{Back.RED}Browser closed!{Back.RESET}')
 
 			return
@@ -3059,7 +3219,7 @@ class Booster:
 			return
 
 		try:
-			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Mentalist')
+			self.CHROME_USER_DATA = os.path.join(self.config['CHROME_USER_DATA'], 'Mentalist2')
 		except KeyError:
 			input(f'{Style.BRIGHT}{Back.RED}Path to Chrome User Data not found!{Back.RESET}')
 
@@ -3442,7 +3602,7 @@ class Booster:
 					self.play()
 		except KeyboardInterrupt:
 			return
-		except KeyboardInterrupt as e:
+		except Exception as e:
 			input(f'\n{Style.BRIGHT}{Back.RED}Browser closed!{Back.RESET}')
 
 			return
@@ -3566,6 +3726,7 @@ class Stalker:
 		print(f'{Style.BRIGHT}{color}Move [NEW ID] to [NEW ID]')
 		print(f'{Style.BRIGHT}{color}Update - update all players')
 		print(f'{Style.BRIGHT}{color}Update [ID] - update chosen player')
+		print(f'{Style.BRIGHT}{color}Plot [ID] [ID]... - plot graphs for players')
 		print(f'{Style.BRIGHT}{color}P [PAGE]')
 		print(f'{Style.BRIGHT}{color}L - previous page')
 		print(f'{Style.BRIGHT}{color}R - next page')
@@ -3990,6 +4151,371 @@ class Stalker:
 
 		self.updating = False
 
+	def plot_targets(self, indices):
+		print(f'{Style.BRIGHT}{Fore.YELLOW}Analyzing data & Predicting future...{Fore.RESET}')
+
+		np.seterr(divide='ignore', invalid='ignore')
+
+		plotly_colors = ['#00FF00', '#FF0000', '#0000FF', '#FFA500', '#800080', '#00FFFF', '#FF00FF', '#FFFF00']
+		console_colors = [Fore.GREEN, Fore.RED, Fore.BLUE, Fore.YELLOW, Fore.MAGENTA, Fore.CYAN, Fore.MAGENTA, Fore.YELLOW]
+		
+		fig = make_subplots(specs=[[{'secondary_y': True}]])
+		
+		log_header_fmt = '%a %b %d %H:%M:%S %Y'
+		online_fmt = '%d.%m.%Y %H:%M:%S'
+		
+		re_header = re.compile(r'^[A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4}')
+		re_online = re.compile(r'Last online:\s+(.+?)\s+->\s+(.+)')
+		re_xp = re.compile(r'Clan Player xp:\s+(\d+|HIDDEN)\s+->\s+(\d+|HIDDEN)')
+
+		player_data = {}
+		all_timestamps = []
+		targets_found = False
+
+		for idx, list_index in enumerate(indices):
+			try:
+				target_id = list(self.TARGETS)[list_index]
+				target_data = self.TARGETS[target_id][-1]
+				player_name = target_data.get('name', target_id)
+			except IndexError:
+				continue
+
+			filename = f'targets/{target_id}.txt'
+
+			if not os.path.exists(filename):
+				print(f'{Style.BRIGHT}{Back.RED}Log file for {player_name} not found!{Back.RESET}')
+
+				continue
+
+			targets_found = True
+			p_color = plotly_colors[idx % len(plotly_colors)]
+			c_color = console_colors[idx % len(console_colors)]
+			
+			sessions = []
+			xp_points = []
+			current_log_context = None
+
+			with open(filename, 'r', encoding='utf-8') as f:
+				lines = f.readlines()
+
+			for line in lines:
+				line = line.strip()
+
+				if not line:
+					continue
+
+				if re_header.match(line):
+					try:
+						clean_ts = re.sub(r'\s+', ' ', line)
+						current_log_context = datetime.strptime(clean_ts, log_header_fmt)
+					except ValueError:
+						pass
+
+					continue
+
+				online_match = re_online.search(line)
+
+				if online_match:
+					start_str, end_str = online_match.groups()
+
+					try:
+						dt_start = datetime.strptime(start_str, online_fmt)
+						dt_end = datetime.strptime(end_str, online_fmt)
+						duration = (dt_end - dt_start).total_seconds() / 60
+						
+						if 0 < duration < 360:
+							sessions.append({
+								'Start': dt_start,
+								'End': dt_end,
+								'Duration': duration
+							})
+
+							all_timestamps.append(dt_start)
+							all_timestamps.append(dt_end)
+					except ValueError:
+						pass
+
+					continue
+
+				if current_log_context:
+					xp_match = re_xp.search(line)
+
+					if xp_match:
+						old_xp, new_xp = xp_match.groups()
+
+						if new_xp != 'HIDDEN' and new_xp.isdigit():
+							val = int(new_xp)
+
+							if not xp_points or xp_points[-1]['XP'] != val:
+								xp_points.append({
+									'Time': current_log_context,
+									'XP': val
+								})
+
+								all_timestamps.append(current_log_context)
+
+			sessions.sort(key=lambda x: x['Start'])
+			xp_points.sort(key=lambda x: x['Time'])
+
+			player_data[player_name] = {
+				'sessions': sessions,
+				'xp': xp_points,
+				'color': p_color,
+				'console_color': c_color,
+				'index': list_index
+			}
+
+		if not targets_found or not all_timestamps:
+			print(f'{Style.BRIGHT}{Back.RED}No valid data found to analyze!{Back.RESET}')
+
+			return
+
+		print(f'{Style.BRIGHT}{Fore.CYAN}--- RELATIONSHIP REPORT ---{Fore.RESET}')
+		
+		max_hist_time = max(all_timestamps)
+		min_hist_time = min(all_timestamps).replace(second=0)
+		
+		full_rng = pd.date_range(start=min_hist_time, end=max_hist_time + timedelta(minutes=1), freq='1min')
+		df_matrix = pd.DataFrame(index=full_rng)
+		
+		for name, data in player_data.items():
+			x_lines = []
+			y_lines = []
+
+			for s in data['sessions']:
+				x_lines.extend([s['Start'], s['End'], None])
+				y_lines.extend([data['index'], data['index'], None])
+
+			if x_lines:
+				fig.add_trace(
+					go.Scatter(
+						x=x_lines,
+						y=y_lines,
+						mode='lines',
+						line=dict(color=data['color'], width=12),
+						name=f'{name} Online',
+						legendgroup=name,
+						hoverinfo='name+x'
+					),
+					secondary_y=False
+				)
+
+			if data['xp']:
+				df_xp = pd.DataFrame(data['xp'])
+
+				fig.add_trace(
+					go.Scatter(
+						x=df_xp['Time'],
+						y=df_xp['XP'],
+						mode='lines+markers',
+						line=dict(color=data['color'], width=2),
+						marker=dict(size=5),
+						name=f'{name} XP',
+						legendgroup=name,
+						hovertemplate=f'<b>{name}</b><br>XP: %{{y}}<br>%{{x}}<extra></extra>'
+					),
+					secondary_y=True
+				)
+
+			series = pd.Series(0, index=full_rng)
+
+			for s in data['sessions']:
+				s_r = s['Start'].replace(second=0)
+				e_r = s['End'].replace(second=0) + timedelta(minutes=1)
+				series.loc[s_r:e_r] = 1
+
+			for x in data['xp']:
+				t = x['Time'].replace(second=0)
+				series.loc[t - timedelta(minutes=1) : t + timedelta(minutes=1)] = 1
+
+			df_matrix[name] = series.rolling(window=5, center=True, min_periods=1).max().fillna(0)
+
+		players = list(player_data.keys())
+
+		if len(players) > 1:
+			for p1, p2 in combinations(players, 2):
+				vec1 = df_matrix[p1]
+				vec2 = df_matrix[p2]
+				
+				intersection = (vec1 * vec2).sum()
+				min_duration = min(vec1.sum(), vec2.sum())
+				
+				coop_score = intersection / min_duration if min_duration > 0 else 0
+				
+				sync_count = 0
+				xp_sync_count = 0
+				sessions1 = player_data[p1]['sessions']
+				sessions2 = player_data[p2]['sessions']
+				
+				for s1 in sessions1:
+					for s2 in sessions2:
+						if abs((s1['Start'] - s2['Start']).total_seconds()) <= 180:
+							sync_count += 1
+
+						elif abs((s1['End'] - s2['End']).total_seconds()) <= 180:
+							sync_count += 1
+							
+				xp1 = player_data[p1]['xp']
+				xp2 = player_data[p2]['xp']
+
+				for x1 in xp1:
+					for x2 in xp2:
+						if abs((x1['Time'] - x2['Time']).total_seconds()) <= 60:
+							xp_sync_count += 1
+
+				score = (coop_score * 0.6) + (min(xp_sync_count, 5) / 5 * 0.4)
+				
+				if score < 0.1 and sync_count == 0:
+					continue
+
+				verdict = 'Strangers'
+				verdict_color = Fore.WHITE
+				
+				if xp_sync_count >= 3:
+					verdict = 'High Sync / Party / Multiboxing'
+					verdict_color = Fore.GREEN
+
+				elif coop_score > 0.7:
+					verdict = 'Duo / Soulmates'
+					verdict_color = Fore.CYAN
+
+				elif coop_score > 0.3:
+					verdict = 'Friends'
+					verdict_color = Fore.YELLOW
+
+				print(f'{Style.BRIGHT}{p1} <-> {p2}:')
+				print(f'  Co-op Score: {coop_score:.2f} (Played together {int(intersection)} mins)')
+				print(f'  Login/Logout Sync: {sync_count} | XP Sync: {xp_sync_count}')
+				print(f'  Verdict: {verdict_color}{verdict}{Style.RESET_ALL}\n')
+
+		future_start = max_hist_time
+		future_end = future_start + timedelta(hours=24)
+		prediction_steps = pd.date_range(start=future_start, end=future_end, freq='15min')
+
+		for name, data in player_data.items():
+			activity_timestamps = []
+
+			for s in data['sessions']:
+				curr = s['Start']
+
+				while curr < s['End']:
+					activity_timestamps.append(curr)
+					curr += timedelta(minutes=15)
+
+			for x in data['xp']:
+				activity_timestamps.append(x['Time'])
+
+			if not activity_timestamps:
+				continue
+
+			activity_profile = np.zeros(96)
+
+			for t in activity_timestamps:
+				slot = (t.hour * 4) + (t.minute // 15)
+				activity_profile[slot] += 1
+
+			max_act = np.max(activity_profile)
+
+			if max_act == 0:
+				continue
+			
+			pred_x = []
+			pred_y = []
+			pred_text = []
+			
+			next_session_time = None
+
+			for step_time in prediction_steps:
+				slot = (step_time.hour * 4) + (step_time.minute // 15)
+				prob = activity_profile[slot] / max_act
+
+				if prob >= 0.5:
+					if next_session_time is None:
+						next_session_time = step_time
+					
+					pred_x.extend([step_time, step_time + timedelta(minutes=15), None])
+					pred_y.extend([data['index'], data['index'], None])
+					
+					prob_str = f"{prob:.0%}"
+					pred_text.extend([prob_str, prob_str, ''])
+			
+			if next_session_time:
+				time_str = next_session_time.strftime('%a %H:%M')
+
+				print(f'{data["console_color"]}Ghost Trace ({name}): Expect online at {time_str}{Fore.RESET}')
+
+			if pred_x:
+				fig.add_trace(
+					go.Scatter(
+						x=pred_x,
+						y=pred_y,
+						mode='lines',
+						line=dict(color=data['color'], width=12, dash='dot'),
+						opacity=0.5,
+						name=f'{name} (Forecast)',
+						legendgroup=name,
+						showlegend=False,
+						customdata=pred_text,
+						hovertemplate=f'<b>{name} Forecast</b><br>Time: %{{x|%H:%M}}<br>Probability: %{{customdata}}<extra></extra>'
+					),
+					secondary_y=False
+				)
+
+		fig.update_layout(
+			title='Stalker Analysis + AI Forecast (24h)',
+			template='plotly_dark',
+			hovermode='closest',
+			height=800,
+			legend=dict(orientation='h', y=1.02, xanchor='right', x=1),
+			shapes=[dict(
+				type='line',
+				x0=future_start, x1=future_start,
+				y0=-1, y1=len(self.TARGETS), xref='x', yref='y',
+				line=dict(color='white', width=1, dash='dash')
+			)]
+		)
+
+		tick_vals = []
+		tick_text = []
+
+		for name, data in player_data.items():
+			tick_vals.append(data['index'])
+			tick_text.append(name)
+
+		fig.update_yaxes(
+			title_text='Activity',
+			tickvals=tick_vals,
+			ticktext=tick_text,
+			secondary_y=False,
+			range=[-1, len(self.TARGETS)]
+		)
+
+		fig.update_yaxes(
+			title_text='XP Growth',
+			secondary_y=True,
+			showgrid=False
+		)
+		
+		fig.update_xaxes(title_text='Timeline (Past | Future)')
+		
+		output_path = 'targets/plot_analysis.html'
+
+		if not os.path.exists('targets'):
+			os.mkdir('targets')
+		
+		fig.write_html(output_path)
+
+		print(f'\n{Style.BRIGHT}{Fore.GREEN}Analysis saved! Opening...{Fore.RESET}')
+
+		try:
+			import webbrowser
+
+			webbrowser.open('file://' + os.path.abspath(output_path))
+		except:
+			pass
+		
+		input(f'\n{Style.BRIGHT}{Fore.YELLOW}Press Enter to continue...{Fore.RESET}')
+
 	def monitor(self):
 		banner(self.__class__.__name__)
 
@@ -4145,6 +4671,25 @@ class Stalker:
 
 				return
 
+		elif cmd.lower().startswith('plot '):
+			try:
+				args = cmd.split(' ')[1:]
+				indices = []
+				
+				for arg in args:
+					idx = int(arg)
+
+					if 1 <= idx <= len(self.TARGETS):
+						indices.append(idx - 1)
+
+					else:
+						print(f'{Style.BRIGHT}{Back.RED}ID {idx} out of range!{Back.RESET}')
+				
+				if indices:
+					self.plot_targets(indices)
+			except ValueError:
+				input(f'\n{Style.BRIGHT}{Back.RED}Invalid IDs!')
+
 		elif cmd.lower() == 'l':
 			if self.monitor_page != 1:
 				self.monitor_page -= 1
@@ -4290,7 +4835,7 @@ class Stalker:
 						break
 		except KeyboardInterrupt:
 			return
-		except KeyboardInterrupt as e:
+		except Exception as e:
 			input(f'\n{Style.BRIGHT}{Back.RED}{str(e)}{Back.RESET}')
 
 			return

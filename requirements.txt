@@ -1,6 +1,8 @@
 colorama
 ntplib
+pandas
 playsound
+plotly
 psutil
 PyAutoGUI
 PyGetWindow
