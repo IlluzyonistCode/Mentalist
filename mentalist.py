@@ -34,6 +34,9 @@ init(autoreset=True)
 
 requests.packages.urllib3.disable_warnings()
 
+GLOBAL_CONFIG = dotenv_values('.env')
+GUI_ENABLED = GLOBAL_CONFIG.get('GUI_ENABLED', 'false').lower() == 'true'
+
 
 class GameState:
 	def __init__(self, tracker):
@@ -5026,57 +5029,58 @@ def banner(module=None):
 	print(message)
 
 
-try:
-	while True:
-		banner()
+def _run_cli_mode():
+    try:
+        while True:
+            banner()
 
-		module_classes = [Tracker, Booster, Stalker]
+            module_classes = [Tracker, Booster, Stalker]
 
-		if os.name == 'nt':
-			module_classes.append(Spinner)
+            if os.name == 'nt':
+                module_classes.append(Spinner)
 
-		modules = []
-		disabled_modules = []
+            modules = []
+            disabled_modules = []
 
-		for module_class in module_classes:
-			instance = module_class()
+            for module_class in module_classes:
+                instance = module_class()
 
-			if instance.is_valid:
-				modules.append(instance)
-			
-			else:
-				disabled_modules.append(module_class.__name__)
+                if instance.is_valid:
+                    modules.append(instance)
+                else:
+                    disabled_modules.append(module_class.__name__)
 
-		print()
+            print()
 
-		for i, module in enumerate(modules):
-			module_name = module.__class__.__name__
+            for i, module in enumerate(modules):
+                module_name = module.__class__.__name__
+                print(f'{Style.BRIGHT}{Fore.GREEN}{i + 1}. {Fore.RESET}{Back.GREEN}{module_name}')
 
-			print(f'{Style.BRIGHT}{Fore.GREEN}{i + 1}. {Fore.RESET}{Back.GREEN}{module_name}')
-		
-		if disabled_modules:
-			print()
+            if disabled_modules:
+                print()
+                for module_name in disabled_modules:
+                    print(f'{Style.BRIGHT}{Fore.RED}Module {module_name} is disabled due to configuration errors.{Fore.RESET}')
 
-			for module_name in disabled_modules:
-				print(f'{Style.BRIGHT}{Fore.RED}Module {module_name} is disabled due to configuration errors.{Fore.RESET}')
+            if not modules:
+                print(f'\n{Style.BRIGHT}{Back.RED}All modules failed to load! Check your .env file.{Back.RESET}')
+                input('Press Enter to exit.')
+                break
 
-		if not modules:
-			print(f'\n{Style.BRIGHT}{Back.RED}All modules failed to load! Check your .env file.{Back.RESET}')
-			
-			input('Press Enter to exit.')
+            while True:
+                choice = input(f'\n{Style.BRIGHT}{Fore.YELLOW}Module to run:{Fore.RESET} ')
+                if choice.isdigit() and 1 <= int(choice) <= len(modules):
+                    module = modules[int(choice) - 1]
+                    break
+                print(f'\n{Style.BRIGHT}{Back.RED}Incorrect choice!{Back.RESET}')
 
-			break
+            module.run()
+    except KeyboardInterrupt:
+        pass
 
-		while True:
-			choice = input(f'\n{Style.BRIGHT}{Fore.YELLOW}Module to run:{Fore.RESET} ')
 
-			if choice.isdigit() and 1 <= int(choice) <= len(modules):
-				module = modules[int(choice) - 1]
-
-				break
-
-			print(f'\n{Style.BRIGHT}{Back.RED}Incorrect choice!{Back.RESET}')
-
-		module.run()
-except KeyboardInterrupt:
-	pass
+if __name__ == "__main__":
+    if GUI_ENABLED:
+        from gui_app import run_gui
+        run_gui()
+    else:
+        _run_cli_mode()

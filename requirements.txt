@@ -12,3 +12,4 @@ pytz
 pywinauto
 requests
 undetected-playwright-patch
+Flask
