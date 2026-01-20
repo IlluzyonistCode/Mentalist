@@ -989,7 +989,7 @@ class Tracker:
 
 					return True, local_data
 				
-				elif result.get('status') in ['synced', 'success']
+				elif result.get('status') in ['synced', 'success']:
 					server_data = result.get('data', {})
 					server_hash = result.get('hash', '')
 					
