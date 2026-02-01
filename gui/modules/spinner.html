@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mentalist | Spinner</title>
+    <link rel="icon" type="image/png" href="../assets/favicon.png">
+    <link rel="stylesheet" href="../css/main.css">
+    <link rel="stylesheet" href="../css/spinner.css">
+</head>
+
+<body>
+    <header class="spinner-header">
+        <a href="#" class="back-button" id="backButton" onclick="handleBackNavigation(event)">← BACK</a>
+        <h1>SPINNER</h1>
+        <div class="status-indicator" id="statusIndicator">
+            <span class="status-dot"></span>
+            <span class="status-text">INITIALIZING</span>
+        </div>
+    </header>
+    <div class="spinner-container">
+        <!-- Statistics Panel -->
+        <div class="stats-panel">
+            <div class="stat-card">
+                <div class="stat-label">TOTAL SPINS</div>
+                <div class="stat-value" id="totalSpins">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">SUCCESSFUL</div>
+                <div class="stat-value success" id="successfulSpins">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">FAILED</div>
+                <div class="stat-value failed" id="failedSpins">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">UPTIME</div>
+                <div class="stat-value" id="uptime">00:00:00</div>
+            </div>
+        </div>
+        <!-- Current State Panel -->
+        <div class="state-panel">
+            <h2>CURRENT STATE</h2>
+            <div class="state-content" id="stateContent">
+                <div class="state-row">
+                    <span class="state-label">Phase:</span>
+                    <span class="state-value" id="currentPhase">Waiting for initialization...</span>
+                </div>
+                <div class="state-row">
+                    <span class="state-label">Action:</span>
+                    <span class="state-value" id="currentAction">Idle</span>
+                </div>
+                <div class="state-row">
+                    <span class="state-label">Last Spin:</span>
+                    <span class="state-value" id="lastSpin">Never</span>
+                </div>
+                <div class="state-row">
+                    <span class="state-label">Success Rate:</span>
+                    <span class="state-value" id="successRate">N/A</span>
+                </div>
+            </div>
+            <!-- Visual Spinner Indicator -->
+            <div class="spinner-visual" id="spinnerVisual">
+                <div class="wheel-container">
+                    <div class="wheel" id="wheelAnimation">
+                        <div class="wheel-segment"></div>
+                        <div class="wheel-segment"></div>
+                        <div class="wheel-segment"></div>
+                        <div class="wheel-segment"></div>
+                        <div class="wheel-segment"></div>
+                        <div class="wheel-segment"></div>
+                    </div>
+                    <div class="wheel-center">🎰</div>
+                </div>
+                <div class="spin-status" id="spinStatus">READY</div>
+            </div>
+        </div>
+        <!-- Activity Log Panel -->
+        <div class="log-panel">
+            <div class="log-header">
+                <h2>ACTIVITY LOG</h2>
+                <button class="clear-log-btn" onclick="clearLog()">CLEAR</button>
+            </div>
+            <div class="log-content" id="logContent">
+                <div class="log-entry log-info">
+                    <span class="log-time">[00:00:00]</span>
+                    <span class="log-message">Spinner initialized. Awaiting BlueStacks connection...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="../eel.js"></script>
+    <script>
+    async function handleBackNavigation(event) {
+        event.preventDefault();
+
+        const backButton = document.getElementById('backButton');
+        const statusIndicator = document.getElementById('statusIndicator');
+
+        if (backButton.classList.contains('disabled')) {
+            console.log('Spinner: Navigation blocked - already stopping');
+
+            return;
+        }
+
+        backButton.classList.add('disabled');
+        backButton.textContent = '← STOPPING...';
+        backButton.style.cursor = 'not-allowed';
+        backButton.style.opacity = '0.6';
+
+        statusIndicator.querySelector('.status-text').textContent = 'STOPPING...';
+        statusIndicator.className = 'status-indicator warning';
+
+        try {
+            console.log('Spinner: Stopping module...');
+
+            const result = await eel.spinner_stop()();
+
+            console.log('Spinner: Stop result:', result);
+
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            console.log('Spinner: Redirecting to main menu...');
+            window.location.href = '../index.html';
+        } catch (error) {
+            console.error('Spinner: Navigation error:', error);
+
+            setTimeout(() => window.location.href = '../index.html', 1000);
+        }
+    }
+
+    window.addEventListener('beforeunload', async () => {
+        try {
+            console.log('Spinner: Cleanup on page unload');
+
+            await eel.spinner_stop()();
+        } catch (e) {
+            console.log('Spinner: Cleanup error:', e);
+        }
+    });
+    </script>
+    <script src="../js/spinner.js"></script>
+</body>
+
+</html>

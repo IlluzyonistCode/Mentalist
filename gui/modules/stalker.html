@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mentalist | Stalker</title>
+    <link rel="icon" type="image/png" href="../assets/favicon.png">
+    <link rel="stylesheet" href="../css/main.css">
+    <link rel="stylesheet" href="../css/stalker.css">
+    <link rel="stylesheet" href="../css/animations.css">
+</head>
+
+<body>
+    <header class="stalker-header">
+        <a href="#" class="back-button" id="backButton" onclick="handleBackNavigation(event)">← BACK</a>
+        <h1>STALKER</h1>
+        <div class="header-actions">
+            <button class="action-btn" onclick="updateTargets()" title="Update All">🔄</button>
+            <button class="action-btn" onclick="showAddTarget()" title="Add Target">➕</button>
+        </div>
+    </header>
+    <div class="stalker-container">
+        <div class="targets-list" id="targetsList"></div>
+        <div class="pagination" id="pagination">
+            <button class="page-btn" onclick="previousPage()" id="prevBtn">← Previous</button>
+            <span class="page-info" id="pageInfo">Page 1 / 1</span>
+            <button class="page-btn" onclick="nextPage()" id="nextBtn">Next →</button>
+        </div>
+    </div>
+    <div class="modal" id="addTargetModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>ADD TARGET</h2>
+                <button class="close-btn" onclick="closeAddTarget()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label>In-Game Username:</label>
+                    <input type="text" id="targetUsername" placeholder="Enter username...">
+                </div>
+                <button class="submit-btn" onclick="addTarget()">ADD TARGET</button>
+            </div>
+        </div>
+    </div>
+    <div class="modal" id="targetModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="targetModalTitle">DOSSIER</h2>
+                <button class="close-btn" onclick="closeTargetDetails()">×</button>
+            </div>
+            <div class="modal-body" id="targetModalBody"></div>
+        </div>
+    </div>
+    <script src="../eel.js"></script>
+    <script src="../js/utils.js"></script>
+    <script>
+    async function handleBackNavigation(event) {
+        event.preventDefault();
+
+        const backButton = document.getElementById('backButton');
+
+        if (backButton.classList.contains('disabled')) {
+            console.log('Stalker: Navigation blocked - already stopping');
+
+            return;
+        }
+
+        backButton.classList.add('disabled');
+        backButton.textContent = '← STOPPING...';
+        backButton.style.cursor = 'not-allowed';
+        backButton.style.opacity = '0.6';
+
+        try {
+            console.log('Stalker: Stopping module...');
+
+            const result = await eel.stalker_stop()();
+
+            console.log('Stalker: Stop result:', result);
+
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            console.log('Stalker: Redirecting to main menu...');
+            window.location.href = '../index.html';
+        } catch (error) {
+            console.error('Stalker: Navigation error:', error);
+
+            window.location.href = '../index.html';
+        }
+    }
+
+    window.addEventListener('beforeunload', async () => {
+        try {
+            console.log('Stalker: Cleanup on page unload');
+
+            await eel.stalker_stop()();
+        } catch (e) {
+            console.log('Stalker: Cleanup error:', e);
+        }
+    });
+
+    </script>
+    <script src="../js/stalker.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mentalist</title>
+    <link rel="icon" type="image/png" href="assets/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400..900&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/updater.css">
+    <link rel="stylesheet" href="css/animations.css">
+</head>
+
+<body>
+    <div id="blood-particles"></div>
+
+    <div class="background-watermark">
+        <img src="assets/favicon.png" alt="">
+    </div>
+
+    <header class="main-header">
+        <div class="logo" onclick="window.location.href='index.html'">
+            <div class="brand-container">
+                <img src="assets/favicon.png" alt="M" class="logo-icon">
+                <div class="logo-wrapper">
+                    <div class="logo-main">
+                        <span class="logo-men">Men</span><span class="logo-tal">tal</span><span class="logo-ist">ist</span>
+                    </div>
+                    <div class="author-tag">by Corruptor</div>
+                </div>
+            </div>
+        </div>
+        <div class="server-status">
+            <span class="status-dot"></span>
+            <span class="status-text">Checking Server...</span>
+        </div>
+    </header>
+    
+    <main class="module-selector">
+        <div class="modules-grid">
+            <div class="module-card" data-module="tracker">
+                <div class="card-glow tracker-glow"></div>
+                <div class="card-content">
+                    <div class="card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 6v6l4 2" />
+                        </svg>
+                    </div>
+                    <h2 class="card-title">TRACKER</h2>
+                    <p class="card-description">
+                        Real-time game analysis with AI-powered predictions.
+                        Track players, roles, and strategic scenarios.
+                    </p>
+                    <div class="card-features">
+                        <span class="feature">🎯 Role Detection</span>
+                        <span class="feature">🧠 Mastermind AI</span>
+                        <span class="feature">📊 Live Stats</span>
+                    </div>
+                    <button class="card-button" onclick="launchModule('tracker')">
+                        <span>LAUNCH</span>
+                        <div class="button-glow"></div>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="module-card" data-module="stalker">
+                <div class="card-glow stalker-glow"></div>
+                <div class="card-content">
+                    <div class="card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle cx="12" cy="12" r="3" />
+                        </svg>
+                    </div>
+                    <h2 class="card-title">STALKER</h2>
+                    <p class="card-description">
+                        Monitor player activities, analyze patterns, and predict online schedules.
+                    </p>
+                    <div class="card-features">
+                        <span class="feature">👁️ Player Tracking</span>
+                        <span class="feature">📈 Activity Graphs</span>
+                        <span class="feature">🔮 AI Predictions</span>
+                    </div>
+                    <button class="card-button" onclick="launchModule('stalker')">
+                        <span>LAUNCH</span>
+                        <div class="button-glow"></div>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="module-card" data-module="booster">
+                <div class="card-glow booster-glow"></div>
+                <div class="card-content">
+                    <div class="card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                        </svg>
+                    </div>
+                    <h2 class="card-title">BOOSTER</h2>
+                    <p class="card-description">
+                        Automate gameplay actions for werewolf team with smart targeting.
+                    </p>
+                    <div class="card-features">
+                        <span class="feature">🤖 Auto Actions</span>
+                        <span class="feature">🎲 Smart Play</span>
+                        <span class="feature">⚡ Fast Mode</span>
+                    </div>
+                    <button class="card-button" onclick="launchModule('booster')">
+                        <span>LAUNCH</span>
+                        <div class="button-glow"></div>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="module-card" data-module="spinner">
+                <div class="card-glow spinner-glow"></div>
+                <div class="card-content">
+                    <div class="card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 2a10 10 0 0 1 0 20" />
+                        </svg>
+                    </div>
+                    <h2 class="card-title">SPINNER</h2>
+                    <p class="card-description">
+                        Automated fortune wheel farming for rewards and resources.
+                    </p>
+                    <div class="card-features">
+                        <span class="feature">🎰 Auto Spin</span>
+                        <span class="feature">💎 Reward Farm</span>
+                        <span class="feature">📱 BlueStacks</span>
+                    </div>
+                    <button class="card-button" onclick="launchModule('spinner')">
+                        <span>LAUNCH</span>
+                        <div class="button-glow"></div>
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <footer class="main-footer">
+            <div class="footer-content">
+                <div class="footer-branding">
+                    <span class="logo-men">Men</span><span class="logo-tal">tal</span><span class="logo-ist">ist</span>
+                </div>
+                <div class="footer-info-grid">
+                    <div class="footer-item">
+                        <span class="footer-label">Version</span>
+                        <span class="footer-value">---</span>
+                    </div>
+                    <div class="footer-item">
+                        <span class="footer-label">Modules</span>
+                        <span class="footer-value">---</span>
+                    </div>
+                    <div class="footer-item">
+                        <span class="footer-label">Status</span>
+                        <span class="footer-value">---</span>
+                    </div>
+                </div>
+                <p class="footer-copyright">© 2026 BY CORRUPTOR</p>
+            </div>
+        </footer>
+    </main>
+    
+    <script src="eel.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/updater.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mentalist | Tracker</title>
+    <link rel="icon" type="image/png" href="../assets/favicon.png">
+    <link rel="stylesheet" href="../css/main.css">
+    <link rel="stylesheet" href="../css/tracker.css">
+</head>
+
+<body>
+    <header class="tracker-header">
+        <a href="#" class="back-button disabled" id="backButton" onclick="handleBackNavigation(event)">← BACK</a>
+        <h1>TRACKER</h1>
+        <div class="header-actions">
+            <button class="action-btn" onclick="updatePlayers()" title="Update data">🔄</button>
+            <button class="action-btn" onclick="showMastermind()" title="Run Mastermind AI">🧠</button>
+            <button class="action-btn" onclick="showHelp()" title="Commands Help">❓</button>
+        </div>
+    </header>
+    <div class="remaining-panel" id="remainingPanel">
+        <div class="remaining-section">
+            <span class="remaining-label remaining-good">GOOD:</span>
+            <span class="remaining-roles" id="remainingGood">---</span>
+        </div>
+        <div class="remaining-section">
+            <span class="remaining-label remaining-evil">EVIL:</span>
+            <span class="remaining-roles" id="remainingEvil">---</span>
+        </div>
+        <div class="remaining-section">
+            <span class="remaining-label remaining-unknown">UNKNOWN:</span>
+            <span class="remaining-roles" id="remainingUnknown">---</span>
+        </div>
+    </div>
+    <div class="command-bar">
+        <input type="text" id="commandInput" placeholder="Initializing..." autocomplete="off" disabled>
+        <div class="autocomplete-dropdown" id="autocompleteDropdown"></div>
+    </div>
+    <div class="players-container">
+        <div class="players-grid" id="playersGrid">
+            <div style="grid-column: 1/-1; text-align:center; padding: 2rem; color: var(--text-muted);">
+                Waiting for game start...
+            </div>
+        </div>
+    </div>
+    <div class="modal" id="mastermindModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🧠 MASTERMIND</h2>
+                <button class="close-btn" onclick="closeMastermind()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="prediction-controls">
+                    <select id="focusPlayer">
+                        <option value="">All players</option>
+                    </select>
+                    <button onclick="runPrediction()">ANALYZE</button>
+                </div>
+                <div class="scenarios-list" id="scenariosList"></div>
+            </div>
+        </div>
+    </div>
+    <div class="modal" id="playerModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="playerModalTitle">PLAYER INFO</h2>
+                <button class="close-btn" onclick="closePlayerModal()">×</button>
+            </div>
+            <div class="modal-body" id="playerModalBody"></div>
+        </div>
+    </div>
+    <div class="modal" id="helpModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>❓ COMMANDS REFERENCE</h2>
+                <button class="close-btn" onclick="closeHelp()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="help-content">
+                    <div class="help-section">
+                        <h3>Player Information</h3>
+                        <div class="command-item">
+                            <code>[number] is [role / aura / (not) team / dead / alive]</code>
+                            <p>Set player's role, aura, team, or status</p>
+                            <span class="example">Example: <em>1 is seer</em>, <em>2 is good</em>, <em>3 is not werewolf</em></span>
+                        </div>
+                        <div class="command-item">
+                            <code>Name of [number] is [name]</code>
+                            <p>Set player's name</p>
+                            <span class="example">Example: <em>name of 1 is Alice</em></span>
+                        </div>
+                    </div>
+                    <div class="help-section">
+                        <h3>Player Relations</h3>
+                        <div class="command-item">
+                            <code>[number] = [number]</code>
+                            <p>Mark two players as same team</p>
+                            <span class="example">Example: <em>1 = 2</em></span>
+                        </div>
+                        <div class="command-item">
+                            <code>[number] != [number]</code>
+                            <p>Mark two players as different teams</p>
+                            <span class="example">Example: <em>1 != 3</em></span>
+                        </div>
+                    </div>
+                    <div class="help-section">
+                        <h3>Role Management</h3>
+                        <div class="command-item">
+                            <code>Change [role] to [role]</code>
+                            <p>Change a rotation role to another</p>
+                            <span class="example">Example: <em>change seer to detective</em></span>
+                        </div>
+                        <div class="command-item">
+                            <code>Remove [role] from [number]</code>
+                            <p>Remove role card/icon from player</p>
+                            <span class="example">Example: <em>remove seer from 1</em></span>
+                        </div>
+                        <div class="command-item">
+                            <code>Clear [number]</code>
+                            <p>Reset player's role and team info</p>
+                            <span class="example">Example: <em>clear 5</em></span>
+                        </div>
+                    </div>
+                    <div class="help-section">
+                        <h3>Special Actions</h3>
+                        <div class="command-item">
+                            <code>Cursed turned</code>
+                            <p>Convert cursed player to werewolf</p>
+                        </div>
+                        <div class="command-item">
+                            <code>Storm</code>
+                            <p>Rediscover all players (preserves known info)</p>
+                        </div>
+                        <div class="command-item">
+                            <code>Undo</code>
+                            <p>Cancel last changes</p>
+                        </div>
+                        <div class="command-item">
+                            <code>Redo</code>
+                            <p>Restore cancelled changes</p>
+                        </div>
+                    </div>
+                    <div class="help-section">
+                        <h3>AI Analysis</h3>
+                        <div class="command-item">
+                            <code>Predict</code>
+                            <p>Get game scenarios from Mastermind AI</p>
+                            <span class="example">Example: <em>predict</em>, <em>predict 5</em></span>
+                        </div>
+                    </div>
+                    <div class="help-section">
+                        <h3>System</h3>
+                        <div class="command-item">
+                            <code>End</code>
+                            <p>Stop Tracker module</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="../eel.js"></script>
+    <script src="../js/utils.js"></script>
+    <script>
+    let isInitialized = false;
+
+    setTimeout(() => {
+        if (!isInitialized) {
+            console.warn('Initialization timeout - enabling controls');
+
+            enableControls();
+        }
+    }, 5000);
+
+    function enableControls() {
+        isInitialized = true;
+
+        const backButton = document.getElementById('backButton');
+        backButton.classList.remove('disabled');
+
+        const commandInput = document.getElementById('commandInput');
+        commandInput.disabled = false;
+        commandInput.placeholder = 'Enter command (e.g. 1 is seer)...';
+    }
+
+    async function handleBackNavigation(event) {
+        event.preventDefault();
+
+        const backButton = document.getElementById('backButton');
+
+        if (backButton.classList.contains('disabled')) {
+            console.log('Navigation blocked - module not ready or already stopping');
+            
+            return;
+        }
+
+        backButton.classList.add('disabled');
+        backButton.textContent = '← STOPPING...';
+
+        try {
+            console.log('Stopping Tracker module...');
+
+            await eel.tracker_stop()();
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            window.location.href = '../index.html';
+        } catch (error) {
+            console.error('Navigation error:', error);
+            window.location.href = '../index.html';
+        }
+    }
+
+    if (typeof eel !== 'undefined') {
+        eel.expose(tracker_initialization_complete);
+
+        function tracker_initialization_complete() {
+            console.log('Tracker initialization complete');
+
+            enableControls();
+        }
+
+        eel.expose(tracker_initialization_failed);
+
+        function tracker_initialization_failed() {
+            console.error('Tracker initialization failed');
+
+            enableControls();
+
+            const backButton = document.getElementById('backButton');
+            backButton.textContent = '← BACK (ERROR)';
+            backButton.style.color = 'var(--cli-red)';
+        }
+    }
+
+    window.addEventListener('beforeunload', async () => {
+        if (isInitialized) {
+            try {
+                await eel.tracker_stop()();
+            } catch (e) {
+                console.log('Cleanup error:', e);
+            }
+        }
+    });
+    </script>
+    <script src="../js/tracker.js"></script>
+</body>
+
+</html>

@@ -1,4 +1,5 @@
 colorama
+eel
 ntplib
 pandas
 playsound
@@ -11,5 +12,5 @@ python-dotenv
 pytz
 pywinauto
 requests
+tzlocal
 undetected-playwright-patch
-Flask

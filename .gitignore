@@ -11,6 +11,7 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+releases/
 downloads/
 eggs/
 .eggs/
@@ -151,6 +152,7 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 
-# Players data
-data/
-targets/
+# Data
+.mentalist_data/
+.user_data/
+config.txt

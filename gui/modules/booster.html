@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mentalist | Booster</title>
+    <link rel="icon" type="image/png" href="../assets/favicon.png">
+    <link rel="stylesheet" href="../css/main.css">
+    <link rel="stylesheet" href="../css/booster.css">
+</head>
+
+<body>
+    <header class="booster-header">
+        <a href="#" class="back-button" id="backButton" onclick="handleBackNavigation(event)">← BACK</a>
+        <h1>BOOSTER</h1>
+        <div class="status-indicator" id="statusIndicator">
+            <span class="status-dot"></span>
+            <span class="status-text">INITIALIZING</span>
+        </div>
+    </header>
+    <div class="booster-container">
+        <div class="stats-panel">
+            <div class="stat-card">
+                <div class="stat-label">GAMES PLAYED</div>
+                <div class="stat-value" id="gamesPlayed">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">AS WEREWOLF</div>
+                <div class="stat-value werewolf" id="werewolfGames">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">AS VILLAGER</div>
+                <div class="stat-value villager" id="villagerGames">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">UPTIME</div>
+                <div class="stat-value" id="uptime">00:00:00</div>
+            </div>
+        </div>
+        <div class="game-state-panel">
+            <h2>CURRENT STATE</h2>
+            <div class="state-content" id="gameState">
+                <div class="state-row">
+                    <span class="state-label">Phase:</span>
+                    <span class="state-value" id="currentPhase">Waiting for game...</span>
+                </div>
+                <div class="state-row">
+                    <span class="state-label">Role:</span>
+                    <span class="state-value" id="currentRole">Unknown</span>
+                </div>
+                <div class="state-row">
+                    <span class="state-label">Action:</span>
+                    <span class="state-value" id="currentAction">Idle</span>
+                </div>
+            </div>
+        </div>
+        <div class="log-panel">
+            <div class="log-header">
+                <h2>ACTIVITY LOG</h2>
+                <button class="clear-log-btn" onclick="clearLog()">CLEAR</button>
+            </div>
+            <div class="log-content" id="logContent">
+                <div class="log-entry log-info">
+                    <span class="log-time">[00:00:00]</span>
+                    <span class="log-message">Booster initialized. Waiting for start...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="../eel.js"></script>
+    <script>
+    async function handleBackNavigation(event) {
+        event.preventDefault();
+
+        const backButton = document.getElementById('backButton');
+        const statusIndicator = document.getElementById('statusIndicator');
+
+        if (backButton.classList.contains('disabled')) {
+            console.log('Booster: Navigation blocked - already stopping');
+
+            return;
+        }
+
+        backButton.classList.add('disabled');
+        backButton.textContent = '← STOPPING...';
+        backButton.style.cursor = 'not-allowed';
+        backButton.style.opacity = '0.6';
+
+        statusIndicator.querySelector('.status-text').textContent = 'STOPPING...';
+        statusIndicator.className = 'status-indicator warning';
+
+        try {
+            console.log('Booster: Initiating safe shutdown...');
+
+            const result = await eel.booster_stop()();
+
+            console.log('Booster: Stop result:', result);
+
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            console.log('Booster: Redirecting to main menu...');
+
+            window.location.href = '../index.html';
+        } catch (error) {
+            console.error('Booster: Error during shutdown:', error);
+
+            setTimeout(() => window.location.href = '../index.html', 1000);
+        }
+    }
+
+    window.addEventListener('beforeunload', async () => {
+        try {
+            console.log('Booster: Cleanup on page unload');
+
+            await eel.booster_stop()();
+        } catch (e) {
+            console.log('Booster: Cleanup error:', e);
+        }
+    });
+    </script>
+    <script src="../js/booster.js"></script>
+</body>
+
+</html>
