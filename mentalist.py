@@ -35,11 +35,11 @@ from copy import deepcopy
 from itertools import combinations
 from functools import lru_cache
 from playsound3 import playsound
-from pathlib import Path
 from tzlocal import get_localzone
 from datetime import datetime, timedelta
 from colorama import Back, Fore, Style, init
 from dotenv import dotenv_values
+from path import Path
 from auth_decorator import require_module_auth
 from auth_protection import _integrity_checker
 from data_protection import save_encrypted, load_encrypted
@@ -52,14 +52,6 @@ requests.packages.urllib3.disable_warnings()
 VERSION = '1.0.0'
 MACOS_DISABLE_PLAYWRIGHT_THREADING = (sys.platform == 'darwin')
 
-
-def get_resource_path(relative_path):
-	try:
-		base_path = sys._MEIPASS
-	except:
-		base_path = os.path.abspath('.')
-
-	return os.path.join(base_path, relative_path)
 
 def find_chrome_executable():
 	if sys.platform == 'win32':
@@ -191,6 +183,26 @@ def generate_random_user_agent(device_type=None, browser_type=None, chrome_versi
 		elif browser_type == 'firefox':
 			return f'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:{browser_version}.0) Gecko/{browser_version}.0 Firefox/{browser_version}.0'
 
+def get_executable_path():
+	if getattr(sys, 'frozen', False):
+		return os.path.dirname(sys.executable)
+
+	return os.path.dirname(os.path.abspath(__file__))
+
+
+def get_resource_path(relative_path):
+	try:
+		base_path = sys._MEIPASS
+	except:
+		base_path = os.path.abspath('.')
+
+	return os.path.join(base_path, relative_path)
+
+
+BASE_DIR = get_executable_path()
+MENTALIST_DATA_DIR = Path(os.path.join(BASE_DIR, '.mentalist_data'))
+USER_DATA_DIR = Path(os.path.join(BASE_DIR, '.user_data'))
+
 
 class GameState:
 	def __init__(self, tracker):
@@ -228,8 +240,8 @@ class Mastermind:
 		self.update_state()
 
 	def load_profiles(self):
-		if not os.path.isdir('.mentalist_data'):
-			os.mkdir('.mentalist_data')
+		if not os.path.isdir(MENTALIST_DATA_DIR):
+			os.mkdir(MENTALIST_DATA_DIR)
 
 		local_profiles = load_encrypted('role_profiles') or {}
 		
@@ -920,9 +932,7 @@ class Tracker:
 
 			return
 
-		project_root = Path(__file__).parent
-
-		self.CHROME_USER_DATA = str(project_root / '.user_data' / 'Mentalist')
+		self.CHROME_USER_DATA = USER_DATA_DIR / 'Mentalist'
 
 		os.makedirs(self.CHROME_USER_DATA, exist_ok=True)
 
@@ -1457,8 +1467,8 @@ class Tracker:
 							self.PLAYER_CARDS[player][src_role].append(role)
 
 	def save_cards(self):
-		if not os.path.isdir('.mentalist_data'):
-			os.mkdir('.mentalist_data')
+		if not os.path.isdir(MENTALIST_DATA_DIR):
+			os.mkdir(MENTALIST_DATA_DIR)
 		
 		save_encrypted('cards', self.PLAYER_CARDS)
 		
@@ -1485,8 +1495,8 @@ class Tracker:
 			self.PLAYER_ICONS[player].update(icons)
 
 	def save_icons(self):
-		if not os.path.isdir('.mentalist_data'):
-			os.mkdir('.mentalist_data')
+		if not os.path.isdir(MENTALIST_DATA_DIR):
+			os.mkdir(MENTALIST_DATA_DIR)
 		
 		save_encrypted('icons', self.PLAYER_ICONS)
 
@@ -2750,8 +2760,8 @@ class Tracker:
 			while not all(self.DISCOVERED):
 				time.sleep(1)
 
-			for layer in self.PLAYER_LAYERS:
-				self.load_see(layer['number'], layer['locator'])
+		for layer in self.PLAYER_LAYERS:
+			self.load_see(layer['number'], layer['locator'])
 
 		self.PREV_PLAYERS = [deepcopy(self.PLAYERS)]
 		self.page.evaluate('(players) => localStorage.setItem("players", players)', json.dumps(self.PLAYERS, default=list))
@@ -3565,9 +3575,7 @@ class Booster:
 
 			return
 
-		project_root = Path(__file__).parent
-
-		self.CHROME_USER_DATA = str(project_root / '.user_data' / 'Mentalist')
+		self.CHROME_USER_DATA = USER_DATA_DIR / 'Mentalist'
 
 		os.makedirs(self.CHROME_USER_DATA, exist_ok=True)
 
@@ -3720,7 +3728,7 @@ class Booster:
 			join_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[3]/div[2]/div/div')
 			join_button.click(timeout=5000)
 			
-			time.sleep(2)
+			time.sleep(1)
 
 			try:
 				ok_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div')
@@ -3730,7 +3738,7 @@ class Booster:
 					
 					ok_button.click()
 
-					time.sleep(2)
+					time.sleep(1)
 					
 					return False
 			except:
@@ -3754,7 +3762,7 @@ class Booster:
 			refresh_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div[1]/div[1]/div/div/div/div/div/div/div[2]/div[2]/div[2]/div[2]/div/div/div')
 			refresh_button.click(timeout=5000)
 			
-			time.sleep(2)
+			time.sleep(1)
 			
 			self.log_message('cyan', 'Refreshed room list')
 		except Exception as e:
@@ -4014,7 +4022,7 @@ class Booster:
 		
 		couples = [c for c in couples if c not in werewolf_numbers]
 
-		if has_jww or (couples and not has_jww):
+		if has_jww or (couples and not has_jww and role != 'wolf_seer'):
 			vote = True
 
 		return players, couples, self_number, role, vote, tag
@@ -4341,7 +4349,7 @@ class Booster:
 							
 							game_started_ok_button.click()
 							
-							time.sleep(2)
+							time.sleep(1)
 
 							break
 				except PlaywrightTimeoutError:
@@ -4361,7 +4369,7 @@ class Booster:
 
 							host_left_ok_button.click()
 							
-							time.sleep(2)
+							time.sleep(1)
 							
 							break
 				except PlaywrightTimeoutError:
@@ -4450,7 +4458,7 @@ class Booster:
 
 				try:
 					continue_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div/div[23]/div/div/div[4]/div/div').get_by_text('Продолжить')
-					continue_button.click(timeout=120000)
+					continue_button.click(timeout=30000)
 
 					time.sleep(1)
 
@@ -4471,7 +4479,7 @@ class Booster:
 				play_again_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div[2]/div/div/div/div/div/div[1]/div[1]/div[2]/div[2]/div[3]/div[5]/div[2]/div/div[2]').get_by_text('Играть снова')
 				play_again_button.click(timeout=30000)
 
-				time.sleep(2)
+				time.sleep(1)
 
 				try:
 					modal_ok_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div')
@@ -4727,9 +4735,7 @@ class Stalker:
 
 			return
 
-		project_root = Path(__file__).parent
-
-		self.CHROME_USER_DATA = str(project_root / '.user_data' / 'Mentalist')
+		self.CHROME_USER_DATA = USER_DATA_DIR / 'Mentalist'
 
 		os.makedirs(self.CHROME_USER_DATA, exist_ok=True)
 
@@ -4910,8 +4916,8 @@ class Stalker:
 				self.TARGETS[target_id].pop(0)
 
 	def save_targets(self):
-		if not os.path.isdir('.mentalist_data'):
-			os.mkdir('.mentalist_data')
+		if not os.path.isdir(MENTALIST_DATA_DIR):
+			os.mkdir(MENTALIST_DATA_DIR)
 
 		save_encrypted('targets', self.TARGETS)
 
@@ -4924,11 +4930,11 @@ class Stalker:
 			return
 
 	def add_changes(self, prev_target, target, diff, current_time, clan=False):
-			if not os.path.isdir('.mentalist_data'):
-				os.mkdir('.mentalist_data')
+			if not os.path.isdir(MENTALIST_DATA_DIR):
+				os.mkdir(MENTALIST_DATA_DIR)
 
-			if not os.path.isdir('.mentalist_data/targets'):
-				os.mkdir('.mentalist_data/targets')
+			if not os.path.isdir(MENTALIST_DATA_DIR / targets):
+				os.mkdir(MENTALIST_DATA_DIR / targets)
 
 			target_id = target['id']
 
@@ -4937,7 +4943,7 @@ class Stalker:
 				prev_target = prev_target['clan']
 
 			if diff:
-				with open(f'.mentalist_data/targets/{target_id}.txt', 'a', encoding='utf-8') as f:
+				with open(f'{MENTALIST_DATA_DIR}/targets/{target_id}.txt', 'a', encoding='utf-8') as f:
 					f.write(f'{current_time}\n\n')
 
 					if not target:
@@ -5363,7 +5369,7 @@ class Stalker:
 			except IndexError:
 				continue
 
-			filename = f'.mentalist_data/targets/{target_id}.txt'
+			filename = f'{MENTALIST_DATA_DIR}/targets/{target_id}.txt'
 
 			if not os.path.exists(filename):
 				print(f'{Style.BRIGHT}{Back.RED}Log file for {player_name} not found!{Back.RESET}')
@@ -5681,7 +5687,7 @@ class Stalker:
 		
 		fig.update_xaxes(title_text='Timeline (Past | Future)')
 		
-		output_path = '.mentalist_data/targets/plot_analysis.html'
+		output_path = '{MENTALIST_DATA_DIR}/targets/plot_analysis.html'
 
 		if not os.path.exists('targets'):
 			os.mkdir('targets')
@@ -6389,13 +6395,6 @@ def banner(module=None):
 	message += f'{Style.BRIGHT}{Fore.RED}{"=" * 60}{Fore.RESET}\n'
 
 	print(message)
-
-
-def get_file_dirname():
-	module_name = inspect.currentframe().f_back.f_globals['__name__']
-	module = sys.modules[module_name]
-
-	return Path(module.__file__).parent.absolute()
 
 
 if getattr(sys, 'frozen', False):
