@@ -7,10 +7,12 @@ import os
 import sys
 import time
 import tempfile
-from pathlib import Path
 from datetime import datetime
 from colorama import Fore, Style, Back, init
+from pathlib import Path
+
 init(autoreset=True)
+
 
 class MentalistUpdater:
 	def __init__(self, server_url, api_key, current_version, build_type='cli'):
@@ -26,14 +28,13 @@ class MentalistUpdater:
 		if getattr(sys, 'frozen', False):
 			return Path(sys.executable)
 
-		else:
-			filename_map = {
-				'cli': 'Mentalist CLI.exe',
-				'gui': 'Mentalist GUI.exe',
-				'mobile': 'Mentalist Mobile.zip'
-			}
+		filename_map = {
+			'cli': 'Mentalist CLI.exe',
+			'gui': 'Mentalist GUI.exe',
+			'mobile': 'Mentalist Mobile.zip'
+		}
 
-			return Path(__file__).parent / filename_map.get(self.build_type, 'Mentalist CLI.exe')
+		return Path(__file__).parent / filename_map.get(self.build_type, 'Mentalist CLI.exe')
 
 	def _calculate_checksum(self, filepath):
 		sha256 = hashlib.sha256()
@@ -218,6 +219,7 @@ class MentalistUpdater:
 			current_exe = self._get_exe_path()
 
 			print(f'\n{Style.BRIGHT}{Fore.CYAN}[UPDATER]{Fore.RESET} Restarting application...')
+			
 			time.sleep(1)
 
 			if getattr(sys, 'frozen', False):
@@ -397,10 +399,9 @@ class EelUpdater(MentalistUpdater):
 
 				return {'success': True}
 
-			else:
-				self.send_update('install_failed', {})
+			self.send_update('install_failed', {})
 
-				return {'success': False, 'error': 'Installation failed'}
+			return {'success': False, 'error': 'Installation failed'}
 		except Exception as e:
 			self.send_update('install_failed', {'error': str(e)})
 

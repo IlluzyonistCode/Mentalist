@@ -5041,8 +5041,8 @@ class Stalker:
 			if not os.path.isdir(MENTALIST_DATA_DIR):
 				os.mkdir(MENTALIST_DATA_DIR)
 
-			if not os.path.isdir(MENTALIST_DATA_DIR / targets):
-				os.mkdir(MENTALIST_DATA_DIR / targets)
+			if not os.path.isdir(MENTALIST_DATA_DIR / 'targets'):
+				os.mkdir(MENTALIST_DATA_DIR / 'targets')
 
 			target_id = target['id']
 
@@ -6515,7 +6515,7 @@ if getattr(sys, 'frozen', False):
 
 	ms_playwright_path = os.path.join(base_path, 'ms-playwright')
 
-	if os.path.exists(msplaywright_path):
+	if os.path.exists(ms_playwright_path):
 		os.environ['PLAYWRIGHT_BROWSERS_PATH'] = ms_playwright_path
 
 	possible_node_paths = [
