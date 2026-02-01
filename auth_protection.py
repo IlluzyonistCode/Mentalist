@@ -16,8 +16,7 @@ def get_application_path():
 	if is_frozen():
 		return Path(sys._MEIPASS)
 
-	else:
-		return Path(os.path.abspath('.'))
+	return Path(os.path.abspath('.'))
 
 def find_pyd_files():
 	app_path = get_application_path()
@@ -36,7 +35,7 @@ def find_pyd_files():
 		for module in critical_modules:
 			patterns = [
 				f'{module}{ext}',
-				f'{module}.cp*{ext}',
+				f'{module}.cp*{ext}'
 			]
 			
 			for pattern in patterns:

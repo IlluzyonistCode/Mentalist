@@ -1,15 +1,14 @@
 import shutil
 import subprocess
+import hashlib
+import base64
+import json
 import os
 import sys
 import re
-import json
-import hashlib
-import base64
 import marshal
 import zlib
 import random
-import string
 import time
 import undetected_playwright
 from pathlib import Path
@@ -311,7 +310,6 @@ setup(
 			else:
 				print(result.stderr)
 				return False
-		
 		except subprocess.TimeoutExpired:
 			return False
 		except Exception as e:
@@ -341,7 +339,7 @@ class PyInstallerBuilder:
 		self.dist_dir = dist_dir
 		self.build_dir = build_dir
 		self.hidden_imports = [
-			'auth_protection', 'auth_client', 'auth_decorator', 
+			'auth_protection', 'auth_client', 'auth_decorator', 'data_protection',
 			'updater', 'mentalist', 'mentalist_cli', 'mentalist_gui',
 
 			'pyautogui', 'pywinauto', 'pygetwindow', 'psutil', 'ntplib', 
@@ -364,6 +362,7 @@ class PyInstallerBuilder:
 			'colorama', 'dotenv', 'tzlocal', 'pytz', 'dateutil', 'dateutil.parser',
 			'jaraco.text', 'PIL', 'PIL.Image', 'cv2',
 
+			'cryptography', 'cryptography.fernet', 'cryptography.hazmat.primitives', 'cryptography.hazmat.backends',
 			'base64', 'marshal', 'zlib', 'ctypes', 'uuid', 'hashlib', 'hmac', 'tkinter', '_tkinter'
 		]
 		self.excluded_modules = [
@@ -414,6 +413,7 @@ class PyInstallerBuilder:
 			'--collect-all', 'gevent',
 			'--collect-all', 'undetected_playwright',
 			'--collect-all', 'playwright',
+			'--collect-all', 'cryptography',
 			'--noupx',
 			'--log-level', 'WARN'
 		])
@@ -464,7 +464,13 @@ class BuildOrchestrator:
 			}
 		}
 
-		self.protection_modules = ['auth_client.py', 'auth_decorator.py', 'auth_protection.py']
+		self.protection_modules = [
+			'auth_client.py',
+			'auth_decorator.py',
+			'auth_protection.py',
+			'data_protection.py',
+			'updater.py'
+		]
 		self.core_modules = ['mentalist.py']
 	
 	def _extract_version(self):
@@ -487,7 +493,13 @@ class BuildOrchestrator:
 
 		search_paths = [self.temp_build_env / 'build']
 
-		target_modules = ['auth_client', 'auth_decorator', 'mentalist']
+		target_modules = [
+			'auth_client', 
+			'auth_decorator',
+			'data_protection',
+			'updater',
+			'mentalist'
+		]
 		
 		for search_path in search_paths:
 			if not search_path.exists():
@@ -689,6 +701,8 @@ class BuildOrchestrator:
 		py_files = {
 			'auth_client.py': self.temp_build_env / 'auth_client.py',
 			'auth_decorator.py': self.temp_build_env / 'auth_decorator.py',
+			'data_protection.py': self.temp_build_env / 'data_protection.py',
+			'updater.py': self.temp_build_env / 'updater.py',
 			'mentalist.py': self.temp_build_env / 'mentalist.py'
 		}
 		

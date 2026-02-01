@@ -1,26 +1,30 @@
+import sys
 from gevent import monkey
-monkey.patch_all(subprocess=False)
+
+if sys.platform == 'darwin':
+	monkey.patch_all(subprocess=False, thread=False, Event=False)
+
+else:
+	monkey.patch_all(subprocess=False)
+
 import asyncio
 import nest_asyncio
 import eel
 import requests
 import threading
-import hashlib
+import subprocess
 import pyautogui
 import pywinauto
 import pygetwindow
+import hashlib
 import psutil
 import shutil
 import ntplib
-import copy
 import json
 import os
-import sys
 import re
-import subprocess
 import dateutil
 import pytz
-import math
 import time
 import random
 import uuid
@@ -31,14 +35,14 @@ from copy import deepcopy
 from itertools import combinations
 from functools import lru_cache
 from playsound3 import playsound
-from colorama import Back, Fore, Style, init
+from pathlib import Path
 from tzlocal import get_localzone
 from datetime import datetime, timedelta
+from colorama import Back, Fore, Style, init
 from dotenv import dotenv_values
-from pathlib import Path
-from auth_client import AuthClient
 from auth_decorator import require_module_auth
 from auth_protection import _integrity_checker
+from data_protection import save_encrypted, load_encrypted
 from updater import MentalistUpdater
 
 init(autoreset=True)
@@ -46,6 +50,7 @@ init(autoreset=True)
 requests.packages.urllib3.disable_warnings()
 
 VERSION = '1.0.0'
+MACOS_DISABLE_PLAYWRIGHT_THREADING = (sys.platform == 'darwin')
 
 
 def get_resource_path(relative_path):
@@ -226,12 +231,9 @@ class Mastermind:
 		if not os.path.isdir('.mentalist_data'):
 			os.mkdir('.mentalist_data')
 
-		local_profiles = {}
+		local_profiles = load_encrypted('role_profiles') or {}
 		
-		try:
-			with open('.mentalist_data/role_profiles.json', 'r', encoding='utf-8') as f:
-				local_profiles = json.load(f)
-		except FileNotFoundError:
+		if not local_profiles:
 			print(f'{Style.BRIGHT}{Back.YELLOW}Local role profiles not found. Trying Mentalist Server...{Back.RESET}')
 		
 		if self.tracker.SERVER_ENABLED:
@@ -248,8 +250,7 @@ class Mastermind:
 			
 			if success and server_profiles:
 				try:
-					with open('.mentalist_data/role_profiles.json', 'w', encoding='utf-8') as f:
-						json.dump(server_profiles, f, ensure_ascii=False, indent=2)
+					save_encrypted('role_profiles', server_profiles)
 
 					print(f'{Style.BRIGHT}{Fore.GREEN}Role profiles synced from Mentalist Server!{Fore.RESET}')
 					
@@ -1431,12 +1432,8 @@ class Tracker:
 		''', [number, see_html, see2_html])
 
 	def load_cards(self):
-		try:
-			with open('.mentalist_data/cards.json', 'r') as cards_file:
-				local_cards = json.load(cards_file)
-		except:
-			local_cards = {}
-		
+		local_cards = load_encrypted('cards') or {}
+
 		success, self.PLAYER_CARDS = self.sync_with_server('cards', local_cards, bidirectional=True)
 		
 		if success and self.PLAYER_CARDS != local_cards:
@@ -1463,8 +1460,7 @@ class Tracker:
 		if not os.path.isdir('.mentalist_data'):
 			os.mkdir('.mentalist_data')
 		
-		with open('.mentalist_data/cards.json', 'w') as cards_file:
-			json.dump(self.PLAYER_CARDS, cards_file)
+		save_encrypted('cards', self.PLAYER_CARDS)
 		
 		if self.SERVER_ENABLED:
 			threading.Thread(
@@ -1474,12 +1470,8 @@ class Tracker:
 			).start()
 
 	def load_icons(self):
-		try:
-			with open('.mentalist_data/icons.json', 'r') as icons_file:
-				local_icons = json.load(icons_file)
-		except:
-			local_icons = {}
-		
+		local_icons = load_encrypted('icons') or {}
+
 		success, self.PLAYER_ICONS = self.sync_with_server('icons', local_icons, bidirectional=True)
 		
 		if success and self.PLAYER_ICONS != local_icons:
@@ -1496,9 +1488,8 @@ class Tracker:
 		if not os.path.isdir('.mentalist_data'):
 			os.mkdir('.mentalist_data')
 		
-		with open('.mentalist_data/icons.json', 'w') as icons_file:
-			json.dump(self.PLAYER_ICONS, icons_file)
-		
+		save_encrypted('icons', self.PLAYER_ICONS)
+
 		if self.SERVER_ENABLED:
 			threading.Thread(
 				target=self.sync_with_server,
@@ -1837,16 +1828,16 @@ class Tracker:
 				'mentions': []
 			})
 
-
 		self.find_players()
 
 		if not hard:
-			for p in range(16):
-				for o, old in enumerate(PLAYERS_OLD):
-					if self.PLAYERS[p]['name'] == old['name']:
-						self.PLAYERS[p] = old
+			old_players_dict = {old['name']: old for old in PLAYERS_OLD}
 
-						PLAYERS_OLD.pop(o)
+			for p in range(16):
+				player_name = self.PLAYERS[p]['name']
+
+				if player_name in old_players_dict:
+					self.PLAYERS[p] = old_players_dict[player_name]
 
 	def revert(self, action):
 		if not self.PREV_PLAYERS:
@@ -2744,17 +2735,23 @@ class Tracker:
 					continue
 
 		if len(self.API_KEYS) >= 2:
-			threading.Thread(target=self.set_players_range, args=(1, 0, 8), daemon=True).start()
-			threading.Thread(target=self.set_players_range, args=(2, 8, 16), daemon=True).start()
+			if MACOS_DISABLE_PLAYWRIGHT_THREADING:
+				self.set_players_range(1, 0, 8)
+				self.set_players_range(2, 8, 16)
+
+			else:
+				threading.Thread(target=self.set_players_range, args=(1, 0, 8), daemon=True).start()
+				threading.Thread(target=self.set_players_range, args=(2, 8, 16), daemon=True).start()
 
 		else:
 			self.set_players_range()
 
-		while not all(self.DISCOVERED):
-			time.sleep(1)
+		if not MACOS_DISABLE_PLAYWRIGHT_THREADING and len(self.API_KEYS) >= 2:
+			while not all(self.DISCOVERED):
+				time.sleep(1)
 
-		for layer in self.PLAYER_LAYERS:
-			self.load_see(layer['number'], layer['locator'])
+			for layer in self.PLAYER_LAYERS:
+				self.load_see(layer['number'], layer['locator'])
 
 		self.PREV_PLAYERS = [deepcopy(self.PLAYERS)]
 		self.page.evaluate('(players) => localStorage.setItem("players", players)', json.dumps(self.PLAYERS, default=list))
@@ -4891,10 +4888,12 @@ class Stalker:
 				yield key
 
 	def load_targets(self):
-		try:
-			with open('.mentalist_data/targets.json', 'r', encoding='utf-8') as targets_file:
-				self.TARGETS = json.load(targets_file, object_pairs_hook=OrderedDict)
-		except:
+		targets = load_encrypted('targets')
+			
+		if targets is not None:
+			self.TARGETS = OrderedDict(targets)
+
+		else:
 			self.TARGETS = OrderedDict()
 
 	def write_target(self, target_id, info=None):
@@ -4914,8 +4913,7 @@ class Stalker:
 		if not os.path.isdir('.mentalist_data'):
 			os.mkdir('.mentalist_data')
 
-		with open('.mentalist_data/targets.json', 'w', encoding='utf-8') as targets_file:
-			json.dump(self.TARGETS, targets_file, ensure_ascii=False)
+		save_encrypted('targets', self.TARGETS)
 
 	def get_current_time(self):
 		try:
@@ -6252,8 +6250,11 @@ class Spinner:
 			try:
 				self.log_message('info', 'Waiting for BlueStacks 5...')
 
-				subprocess.Popen([self.BLUESTACKS5_EXECUTABLE, '--cmd', 'launchApp', '--package', 'com.werewolfapps.online'], stdout=subprocess.PIPE)
-				
+				subprocess.Popen(
+					[self.BLUESTACKS5_EXECUTABLE, '--cmd', 'launchApp', '--package', 'com.werewolfapps.online'],
+					stdout=subprocess.PIPE
+				)
+
 				try:
 					self.app = pywinauto.Application(backend='uia').connect(title=self.BLUESTACKS5_NAME, timeout=30)
 
@@ -6392,7 +6393,6 @@ def banner(module=None):
 
 def get_file_dirname():
 	module_name = inspect.currentframe().f_back.f_globals['__name__']
-
 	module = sys.modules[module_name]
 
 	return Path(module.__file__).parent.absolute()
@@ -6409,7 +6409,7 @@ if getattr(sys, 'frozen', False):
 	possible_node_paths = [
 		os.path.join(base_path, 'playwright', 'driver', 'node.exe'),
 		os.path.join(base_path, 'ms-playwright', 'node.exe'),
-		os.path.join(base_path, 'node', 'node.exe'),
+		os.path.join(base_path, 'node', 'node.exe')
 	]
 	
 	for node_path in possible_node_paths:

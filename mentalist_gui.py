@@ -927,7 +927,6 @@ def spinner_start():
 				})
 
 			return {'success': True}
-			
 	except Exception as e:
 		logging.error(f'spinner_start error: {e}')
 		logging.error(traceback.format_exc())

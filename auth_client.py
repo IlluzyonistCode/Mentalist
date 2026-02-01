@@ -16,8 +16,8 @@ import inspect
 from urllib.parse import urlparse
 from functools import wraps
 from datetime import datetime
-from dotenv import dotenv_values
 from colorama import Back, Fore, Style, init
+from dotenv import dotenv_values
 from auth_protection import AntiDebug, WindowsAntiDebug, _integrity_checker, _global_protection
 
 init(autoreset=True)
