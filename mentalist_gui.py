@@ -1,4 +1,5 @@
 from gevent import monkey
+
 monkey.patch_socket()
 monkey.patch_ssl()
 
@@ -12,7 +13,6 @@ import re
 import time
 import logging
 import traceback
-import queue
 import tkinter as tk
 from colorama import Fore, Style, init
 from dotenv import dotenv_values
@@ -337,7 +337,8 @@ def tracker_start():
 						try:
 							tracker.get_bearer()
 							
-							if tracker.check_stop_flag(): break
+							if tracker.check_stop_flag():
+								break
 
 							tracker.load_css()
 							tracker.load_modal()
@@ -356,14 +357,15 @@ def tracker_start():
 							update_status('running', 'Tracking Active')
 
 							while not tracker.check_stop_flag():
-								if not tracker.page or tracker.page.is_closed(): break
+								if not tracker.page or tracker.page.is_closed():
+									break
 								
 								try:
 									tracker.update_players()
 								except Exception as e:
 									logging.debug(f'Update error: {e}')
 
-								time.sleep(1.5)
+								time.sleep(3)
 						except Exception as e:
 							logging.error(f'Game Loop Error: {e}')
 							update_status('error', f'Game Error: {str(e)[:50]}')
@@ -1109,6 +1111,10 @@ def main():
 		root.destroy()
 	except Exception as e:
 		logging.error(f'Tkinter size detection failed: {e}')
+
+
+	if sys.platform == 'darwin':
+		sw += 100
 
 	print(f'{Style.BRIGHT}{Fore.GREEN}Starting Mentalist GUI...{Fore.RESET}')
 	print(f'{Style.BRIGHT}{Fore.CYAN}Screen Resolution: {sw}x{sh}{Fore.RESET}')

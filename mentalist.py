@@ -1,10 +1,11 @@
 import sys
+import warnings
+
+warnings.filterwarnings('ignore', category=Warning, module='gevent')
+
 from gevent import monkey
 
-if sys.platform == 'darwin':
-	monkey.patch_all(subprocess=False, thread=False, Event=False)
-
-else:
+if sys.platform != 'darwin':
 	monkey.patch_all(subprocess=False)
 
 import asyncio
@@ -39,7 +40,7 @@ from tzlocal import get_localzone
 from datetime import datetime, timedelta
 from colorama import Back, Fore, Style, init
 from dotenv import dotenv_values
-from path import Path
+from pathlib import Path
 from auth_decorator import require_module_auth
 from auth_protection import _integrity_checker
 from data_protection import save_encrypted, load_encrypted
@@ -3440,9 +3441,15 @@ class Tracker:
 						'height': int(self.CHROME_VIEWPORT[1])
 					},
 					headless=False,
+					locale='ru-RU',
+					timezone_id='Europe/Moscow',
+					extra_http_headers={
+						'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
+					},
 					args=[
 						'--window-position=-7,40',
-						'--disable-blink-features=AutomationControlled'
+						'--disable-blink-features=AutomationControlled',
+						'--lang=ru-RU'
 					],
 					ignore_default_args=['--enable-automation'],
 					chromium_sandbox=True
@@ -3710,6 +3717,7 @@ class Booster:
 				try:
 					locator = self.page.locator(f'xpath={xpath}').first
 					locator.wait_for(state='visible', timeout=2000)
+
 					room_locator = locator
 
 					break
@@ -3731,16 +3739,31 @@ class Booster:
 			time.sleep(1)
 
 			try:
-				ok_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div')
-				
-				if ok_button.is_visible(timeout=3000):
-					self.log_message('warning', 'Game already started, retrying...')
-					
-					ok_button.click()
+				modal_buttons = [
+					f'/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div',
+					f'/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[3]/div[1]/div'
+				]
 
-					time.sleep(1)
-					
-					return False
+				for modal_button in modal_buttons:
+					try:
+						locator = self.page.locator(f'xpath={modal_button}').first
+
+						if locator.is_visible(timeout=500):
+							try:
+								button_text = locator.text_content(timeout=500)
+							except UnicodeDecodeError:
+								button_text = ''
+							
+							if button_text in ['Окей', 'Отмена', '']:
+								self.log_message('warning', 'Game already started, retrying...')
+								
+								locator.click()
+								
+								time.sleep(1)
+
+								return False
+					except PlaywrightTimeoutError:
+						continue
 			except:
 				pass
 			
@@ -3869,13 +3892,15 @@ class Booster:
 					if not self.player_name:
 						is_self = player_base_locator.evaluate('''
 							(player) => {
-								let sources = [];
+								const allDivs = player.querySelectorAll('div');
+								
+								for (let div of allDivs) {
+									const style = div.getAttribute('style');
 
-								const images = player.getElementsByTagName("img");
+									if (style && style.includes('rgb(236, 64, 122)')) return true;
+								}
 
-								for (image of images) sources.push(image.src);
-
-								return sources;
+								return false;
 							}
 						''', timeout=1000)
 						
@@ -3916,13 +3941,13 @@ class Booster:
 	def get_players_info_werewolf(self):
 		players = []
 		couples = []
+		werewolf_numbers = []
 		self_number = None
 		role = None
 		role_name = None
-		has_jww = False
+		has_junior_werewolf = False
 		vote = False
 		tag = False
-		werewolf_numbers = []
 
 		for i in range(1, 5):
 			for j in range(1, 5):
@@ -3989,17 +4014,16 @@ class Booster:
 
 							werewolf_numbers.append(player_number)
 
-						if 'junior' in icon:
+						if 'junior' in icon or 'split' in icon:
 							if player['self']:
 								tag = True
 								role = 'junior_werewolf'
-							
-						elif 'wolf_seer' in icon or 'wolfseer' in icon:
-							if player['self']:
-								role = 'wolf_seer'
 
 							else:
-								has_jww = True
+								has_junior_werewolf = True
+
+						elif ('wolf_seer' in icon or 'wolfseer') in icon and player['self']:
+							role = 'wolf_seer'
 
 						elif 'lovers' in icon:
 							player['couple'] = True
@@ -4022,7 +4046,7 @@ class Booster:
 		
 		couples = [c for c in couples if c not in werewolf_numbers]
 
-		if has_jww or (couples and not has_jww and role != 'wolf_seer'):
+		if couples and role != 'wolf_seer':
 			vote = True
 
 		return players, couples, self_number, role, vote, tag
@@ -4143,25 +4167,86 @@ class Booster:
 
 	def wait_for_voting_phase(self):
 		self.log_message('info', 'Waiting for voting phase...')
+		
+		phase_locator = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div[1]/div/div/div[1]/div[1]/div/div[2]/div[1]/div[1]/div/div/div[1]/div')
 
+		discussion_started = False
+		voting_started = False
+		empty_text_counter = 0
+		
 		for _ in range(30):
 			if self.check_stop_flag():
 				return False
-
+			
 			try:
-				phase_locator = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div[1]/div/div/div[1]/div[1]/div/div[2]/div[1]/div[1]/div/div/div[1]/div')
 				phase_text = phase_locator.text_content(timeout=1000)
+
+				if phase_text == '':
+					empty_text_counter += 1
+
+					if empty_text_counter >= 5:
+						self.log_message('warning', 'Game ended during night phase')
+
+						return False
+
+					time.sleep(1)
+
+					continue
+
+				empty_text_counter = 0
 
 				if phase_text.startswith('Голосование'):
 					self.log_message('success', 'Voting phase started!')
-					
-					return True
-			except:
-				pass
 
+					voting_started = True
+
+					break
+
+				if phase_text.startswith('Обсуждение'):
+					self.log_message('info', 'Discussion phase started')
+
+					discussion_started = True
+
+					break
+			except PlaywrightTimeoutError:
+				pass
+			
 			time.sleep(1)
 
-		self.log_message('warning', 'Voting phase not detected')
+		if voting_started:
+			return True
+
+		if not discussion_started:
+			self.log_message('warning', 'Neither discussion nor voting phase detected after 30 seconds')
+			
+			return False
+
+		self.log_message('info', 'Waiting for discussion to end...')
+
+		empty_text_counter = 0
+		
+		for _ in range(30):
+			if self.check_stop_flag():
+				return False
+			
+			try:
+				phase_text = phase_locator.text_content(timeout=1000)
+
+				if phase_text == '':
+					self.log_message('warning', 'Game ended during discussion phase')
+
+					return False
+
+				if phase_text.startswith('Голосование'):
+					self.log_message('success', 'Voting phase started!')
+
+					return True
+			except PlaywrightTimeoutError:
+				pass
+			
+			time.sleep(1)
+
+		self.log_message('warning', 'Voting phase not detected after discussion')
 
 		return False
 
@@ -4328,6 +4413,7 @@ class Booster:
 
 			start = False
 			werewolf = False
+			wait_start_time = time.monotonic()
 
 			while True:
 				if self.check_stop_flag():
@@ -4335,8 +4421,32 @@ class Booster:
 					
 					return
 
+				elapsed_time = time.monotonic() - wait_start_time
+
+				if elapsed_time > 120:
+					self.log_message('warning', 'Game not starting for 2 minutes, leaving room...')
+					
+					try:
+						back_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div[1]/div[1]/div[1]/div/div')
+						back_button.click(timeout=5000)
+						
+						time.sleep(1)
+
+						confirm_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[3]/div[2]/div/div')
+						confirm_button.click(timeout=5000)
+						
+						time.sleep(1)
+						
+						self.log_message('success', 'Left the room, returning to lobby...')
+						
+						break
+					except Exception as e:
+						self.log_message('error', f'Failed to leave room: {str(e)[:100]}')
+
+						return
+
 				try:
-					game_started_ok_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div')
+					game_started_ok_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div').first
 					
 					if game_started_ok_button.is_visible(timeout=500):
 						try:
@@ -4457,7 +4567,7 @@ class Booster:
 					return
 
 				try:
-					continue_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div/div[23]/div/div/div[4]/div/div').get_by_text('Продолжить')
+					continue_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div').get_by_text('Продолжить')
 					continue_button.click(timeout=30000)
 
 					time.sleep(1)
@@ -4561,10 +4671,15 @@ class Booster:
 						'height': int(self.CHROME_VIEWPORT[1])
 					},
 					headless=False,
+					locale='ru-RU',
+					timezone_id='Europe/Moscow',
+					extra_http_headers={
+						'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
+					},
 					args=[
 						'--window-position=-7,40',
-						'--mute-audio',
-						'--disable-blink-features=AutomationControlled'
+						'--disable-blink-features=AutomationControlled',
+						'--lang=ru-RU'
 					],
 					ignore_default_args=['--enable-automation'],
 					chromium_sandbox=True
@@ -4594,41 +4709,32 @@ class Booster:
 
 					return
 
-				try:
-					decline_notifications_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div[1]/div/div/div/div/div/div/div[1]/div[1]/div/div/div/div/div/div/div[2]/div[2]/div')
-				
-					if decline_notifications_button.text_content(timeout=10000) == '\uf00d':
-						decline_notifications_button.click()
-				except PlaywrightTimeoutError:
-					pass
-
 				self.log_message('success', 'Website opened!')
-
-				time.sleep(1)
-
-				cancel_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div[1]/div')
-				
-				try:
-					if cancel_button.is_visible(timeout=5000):
-						self.log_message('warning', 'Found startup "Existing game" modal, closing...')
-						
-						cancel_button.click()
-						time.sleep(1)
-				except:
-					pass
 
 				while True:
 					if self.check_stop_flag():
 						self.log_message('info', 'Booster stopping - exiting main loop')
 
 						break
-						
+
 					self.log_message('info', 'Opening custom games menu...')
 
 					while True:
 						if self.check_stop_flag():
 							break
-							
+
+						cancel_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div[1]/div')
+						
+						try:
+							if cancel_button.is_visible(timeout=5000):
+								self.log_message('warning', 'Found startup "Existing game" modal, closing...')
+								
+								cancel_button.click()
+
+								time.sleep(1)
+						except:
+							pass
+
 						try:
 							play_button = self.page.get_by_text('ИГРАТЬ', exact=True)
 							play_button.wait_for(state='visible', timeout=10000)
@@ -4651,6 +4757,7 @@ class Booster:
 									time.sleep(1)
 									
 									continue
+
 							else:
 								time.sleep(0.5)
 						except PlaywrightTimeoutError:
@@ -4682,6 +4789,7 @@ class Booster:
 							self.log_message('cyan', 'Found "Join New" prompt, clicking...')
 
 							join_new_button.click()
+
 							time.sleep(1)
 					except:
 						pass
@@ -5996,13 +6104,18 @@ class Stalker:
 						'height': int(self.CHROME_VIEWPORT[1])
 					},
 					headless=True,
+					locale='ru-RU',
+					timezone_id='Europe/Moscow',
+					extra_http_headers={
+						'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
+					},
 					args=[
 						'--window-position=-7,40',
-						'--mute-audio',
-						'--disable-blink-features=AutomationControlled'
+						'--disable-blink-features=AutomationControlled',
+						'--lang=ru-RU'
 					],
 					ignore_default_args=['--enable-automation'],
-					chromium_sandbox=True,
+					chromium_sandbox=True
 				)
 
 				self.page = context.pages[0]
@@ -6402,7 +6515,7 @@ if getattr(sys, 'frozen', False):
 
 	ms_playwright_path = os.path.join(base_path, 'ms-playwright')
 
-	if os.path.exists(ms_playwright_path):
+	if os.path.exists(msplaywright_path):
 		os.environ['PLAYWRIGHT_BROWSERS_PATH'] = ms_playwright_path
 
 	possible_node_paths = [

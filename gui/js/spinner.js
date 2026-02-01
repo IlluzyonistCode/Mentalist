@@ -44,16 +44,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 try {
                     processingLogs = true;
+
                     const data = await eel.get_spinner_data()();
                     
                     if (!data) return;
-                    
-                    // Обрабатываем состояния
+
                     if (data.states && data.states.length > 0) {
                         const latestState = data.states[data.states.length - 1];
                         
                         if (latestState.initialized && !isInitialized) {
                             isInitialized = true;
+
                             setStatus('running', 'RUNNING');
                             addLog('success', '✓ Emulator initialized - ready to spin');
                         }
@@ -63,20 +64,18 @@ document.addEventListener('DOMContentLoaded', async () => {
                         if (latestState.lastSpin) updateState('lastSpin', latestState.lastSpin);
                         if (latestState.stats) {
                             Object.assign(spinnerStats, latestState.stats);
+                            
                             updateStats();
                         }
                     }
-                    
-                    // БАТЧ-обработка логов
-                    if (data.logs && data.logs.length > 0) {
-                        addLogsBatch(data.logs);
-                    }
+
+                    if (data.logs && data.logs.length > 0) addLogsBatch(data.logs);
                 } catch (e) {
                     console.error('[SPINNER] Polling error:', e);
                 } finally {
                     processingLogs = false;
                 }
-            }, 800); // 800ms - оптимальный баланс
+            }, 1000);
         } else {
             addLog('error', `Failed to start Spinner: ${result.error || 'Unknown error'}`);
             setStatus('error', 'ERROR');
@@ -108,7 +107,6 @@ function setStatus(level, text) {
     statusText.textContent = text;
 }
 
-// БАТЧ-обработка логов
 function addLogsBatch(logs) {
     if (!logs || logs.length === 0) return;
     
@@ -127,6 +125,7 @@ function addLogsBatch(logs) {
         `;
         
         fragment.appendChild(entry);
+
         parseLogForState(log.message);
     });
     
@@ -135,8 +134,8 @@ function addLogsBatch(logs) {
 }
 
 function addLog(type, message) {
-    // Для локальных логов
     const logContent = document.getElementById('logContent');
+
     const entry = document.createElement('div');
     entry.className = `log-entry log-${type}`;
 
@@ -179,15 +178,19 @@ function parseLogForState(message) {
             spinStatus.textContent = 'COMPLETE!';
             spinStatus.className = 'spin-status success';
         }
+
         if (wheel) wheel.classList.remove('spinning');
     } else if (msg.includes('watching ad')) {
         updateState('phase', 'Watching advertisement');
         updateState('action', 'Ad in progress (120s)');
 
         let countdown = 120;
+
         const countdownInterval = setInterval(() => {
             countdown--;
+
             updateState('action', `Ad in progress (${countdown}s)`);
+
             if (countdown <= 0) clearInterval(countdownInterval);
         }, 1000);
     } else if (msg.includes('checking spin button')) {
@@ -198,6 +201,7 @@ function parseLogForState(message) {
         updateState('action', 'Processing spin');
 
         if (wheel) wheel.classList.add('spinning');
+
         if (spinStatus) {
             spinStatus.textContent = 'SPINNING!';
             spinStatus.className = 'spin-status spinning';
@@ -205,6 +209,7 @@ function parseLogForState(message) {
 
         setTimeout(() => {
             if (wheel) wheel.classList.remove('spinning');
+
             if (spinStatus) {
                 spinStatus.textContent = 'SUCCESS';
                 spinStatus.className = 'spin-status success';
@@ -239,6 +244,7 @@ function updateState(key, value) {
     if (currentState[key] === value) return;
     
     currentState[key] = value;
+
     updateStateDisplay();
 }
 
@@ -257,7 +263,7 @@ function updateStateDisplay() {
         const rate = Math.round((spinnerStats.successfulSpins / spinnerStats.totalSpins) * 100);
         document.getElementById('successRate').textContent = `${rate}%`;
         currentState.successRate = `${rate}%`;
-    }s
+    }
 }
 
 function updateStats() {

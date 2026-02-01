@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (result.success) {
             addLog('success', 'Booster started successfully!');
+
             boosterStartTime = Date.now();
 
             setInterval(updateUptime, 1000);
@@ -62,7 +63,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 } finally {
                     processingLogs = false;
                 }
-            }, 800);
+            }, 1000);
         } else {
             addLog('error', `Failed to start Booster: ${result.error || 'Unknown error'}`);
             setStatus('error', 'ERROR');
@@ -121,6 +122,7 @@ function addLogsBatch(logs) {
 
 function addLog(type, message) {
     const logContent = document.getElementById('logContent');
+
     const entry = document.createElement('div');
     entry.className = `log-entry log-${type}`;
 
@@ -177,10 +179,12 @@ function parseLogForState(message) {
             updateState('role', roleCapitalized);
 
             if (roleName.toLowerCase().includes('wolf')) {
-                updateState('phase', 'Night phase');
+                updateState('phase', 'Night');
+
                 boosterStats.werewolfGames++;
             } else {
-                updateState('phase', 'Day phase');
+                updateState('phase', 'Day');
+
                 boosterStats.villagerGames++;
             }
 
@@ -223,7 +227,7 @@ function parseLogForState(message) {
     } else if (msg.includes('no suspicious target')) {
         updateState('action', 'No threats');
     } else if (msg.includes('waiting for voting phase')) {
-        updateState('action', 'Waiting for voting');
+        updateState('action', 'Waiting for voting phase');
     } else if (msg.includes('voting phase started')) {
         updateState('phase', 'Voting phase');
         updateState('action', 'Ready to vote');
@@ -237,6 +241,7 @@ function parseLogForState(message) {
         updateState('action', 'Processing');
 
         boosterStats.gamesPlayed++;
+
         updateStats();
     } else if (msg.includes('exiting')) {
         updateState('phase', 'Exiting');
@@ -248,6 +253,7 @@ function updateState(key, value) {
     if (currentState[key] === value) return;
     
     currentState[key] = value;
+
     updateStateDisplay();
 }
 
@@ -262,12 +268,14 @@ function updateStateDisplay() {
         currentState.role.toLowerCase().includes('wolf')) {
         roleEl.classList.add('werewolf');
     }
+
     else if (currentState.role !== 'Unknown') roleEl.classList.add('villager');
 
     const actionEl = document.getElementById('currentAction');
     actionEl.textContent = currentState.action;
 
     if (currentState.action !== 'Idle' && currentState.action !== 'Waiting') actionEl.classList.add('active');
+    
     else actionEl.classList.remove('active');
 }
 

@@ -107,7 +107,7 @@ function createBloodParticle(container) {
     const particle = document.createElement('div');
     particle.className = 'blood-particle';
 
-    const size = Math.random() * 4 + 2;
+    const size = Math.random() * 8 + 5;
     const startX = Math.random() * 100;
     const startY = Math.random() * 100;
     const duration = Math.random() * 20 + 15;
