@@ -250,7 +250,7 @@ async function showTargetDetails(targetId) {
                 <h4>IDENTITY</h4>
                 <p><strong>ID:</strong> ${target.id}</p>
                 <p><strong>Created:</strong> ${target.created || 'Unknown'}</p>
-                <p><strong>Bio:</strong> <i>${target.bio || 'No data'}</i></p>
+                <p><strong>Bio:</strong> ${target.bio || 'No data'}</p>
             </div>
             
             <div class="dossier-grid">

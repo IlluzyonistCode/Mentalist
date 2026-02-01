@@ -2,7 +2,7 @@ colorama
 eel
 ntplib
 pandas
-playsound
+playsound3
 plotly
 psutil
 PyAutoGUI

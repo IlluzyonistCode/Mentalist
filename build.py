@@ -345,7 +345,7 @@ class PyInstallerBuilder:
 			'updater', 'mentalist', 'mentalist_cli', 'mentalist_gui',
 
 			'pyautogui', 'pywinauto', 'pygetwindow', 'psutil', 'ntplib', 
-			'playsound', 'pyscreeze', 'pytweening', 'mouseinfo', 'pymsgbox', 'pyrect',
+			'playsound3', 'pyscreeze', 'pytweening', 'mouseinfo', 'pymsgbox', 'pyrect',
 
 			'requests', 'urllib3', 'chardet', 'idna', 'certifi', 'tenacity',
 			'eel', 'bottle', 'bottle_websocket', 'geventwebsocket', 'geventwebsocket.handler',
@@ -460,7 +460,7 @@ class BuildOrchestrator:
 			'gui': {
 				'name': 'Mentalist GUI',
 				'script': 'mentalist_gui.py',
-				'console': False
+				'console': True
 			}
 		}
 

@@ -2,19 +2,19 @@
     --men-red: #ff4444;
     --tal-gold: #ffed4e;
     --ist-bone: #d1c1c1;
-    
+
     --bg-void: #020101;
     --bg-cabinet: #0a0707;
     --bg-plate: #110d0d;
     --bg-tray: #1a1414;
-    
+
     --blood-dried: #4a0000;
     --blood-dark: #6b0000;
     --blood-arterial: #8b0000;
     --blood-bright: #cc0000;
     --dark-blood: #4a0000;
     --blood-red: #8b0000;
-    
+
     --text-bright: #ffffff;
     --text-bone: #d1c1c1;
     --text-primary: #d1c1c1;
@@ -22,14 +22,14 @@
     --text-ash: #8c7a7a;
     --text-muted: #5a4f4f;
     --text-dirt: #5a4f4f;
-    
+
     --cli-green: #00ff88;
     --cli-yellow: #ffed4e;
     --cli-red: #ff4444;
     --cli-cyan: #00d4ff;
     --cli-purple: #b537f2;
     --neon-yellow: #ffed4e;
-    
+
     --shadow-deep: 0 40px 100px rgba(0, 0, 0, 0.9);
     --shadow-blood: 0 0 60px rgba(139, 0, 0, 0.4);
     --shadow-red: 0 0 60px rgba(139, 0, 0, 0.4);
@@ -84,7 +84,6 @@ body {
 
 .stalker-header h1 {
     font-family: 'Playfair Display', serif;
-    font-style: italic;
     font-size: 1.8rem;
     color: var(--men-red);
     margin: 0;
@@ -155,7 +154,9 @@ body {
 .target-card::before {
     content: '';
     position: absolute;
-    left: 0; top: 0; bottom: 0;
+    left: 0;
+    top: 0;
+    bottom: 0;
     width: 0;
     background: var(--blood-red);
     transition: width 0.3s ease;
@@ -335,8 +336,13 @@ body {
     color: var(--text-secondary);
 }
 
-.mini-stat strong.green { color: var(--cli-green); }
-.mini-stat strong.red { color: var(--cli-red); }
+.mini-stat strong.green {
+    color: var(--cli-green);
+}
+
+.mini-stat strong.red {
+    color: var(--cli-red);
+}
 
 .compact-clan {
     margin-top: 1rem;
@@ -363,7 +369,6 @@ body {
     color: var(--cli-purple);
     font-family: 'Playfair Display', serif;
     font-weight: 700;
-    font-style: italic;
     flex: 1;
 }
 
@@ -427,7 +432,6 @@ body {
 .page-info {
     font-family: 'Playfair Display', serif;
     font-size: 1.3rem;
-    font-style: italic;
     color: var(--text-secondary);
 }
 
@@ -470,7 +474,7 @@ body {
 
 .modal-header h2 {
     font-family: 'Playfair Display', serif;
-    font-style: italic;
+
     font-size: 1.6rem;
     color: var(--men-red);
     margin: 0;
@@ -484,11 +488,16 @@ body {
     font-size: 2rem;
     cursor: pointer;
     transition: var(--transition-fast);
-    width: 40px; height: 40px;
-    display: flex; align-items: center; justify-content: center;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.modal-body { padding: 2rem; }
+.modal-body {
+    padding: 2rem;
+}
 
 .dossier-layout {
     display: flex;
@@ -501,7 +510,6 @@ body {
     border-bottom: 1px solid var(--blood-dried);
     padding-bottom: 0.5rem;
     font-family: 'Playfair Display', serif;
-    font-style: italic;
 }
 
 .dossier-grid {
@@ -533,7 +541,10 @@ body {
     text-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
 }
 
-.role-stat { margin-bottom: 1rem; }
+.role-stat {
+    margin-bottom: 1rem;
+}
+
 .role-stat span {
     display: block;
     font-family: 'Cinzel', serif;
@@ -551,13 +562,34 @@ body {
     overflow: hidden;
 }
 
-.progress-fill { height: 100%; transition: width 1s ease-out; }
-.progress-fill.green { background: linear-gradient(90deg, #004400, var(--cli-green)); }
-.progress-fill.red { background: linear-gradient(90deg, var(--dark-blood), var(--cli-red)); }
-.progress-fill.purple { background: linear-gradient(90deg, #440044, var(--cli-purple)); }
+.progress-fill {
+    height: 100%;
+    transition: width 1s ease-out;
+}
 
-.input-group { margin-bottom: 1.5rem; }
-.input-group label { display: block; margin-bottom: 0.5rem; color: var(--text-ash); font-family: 'Cinzel', serif; }
+.progress-fill.green {
+    background: linear-gradient(90deg, #004400, var(--cli-green));
+}
+
+.progress-fill.red {
+    background: linear-gradient(90deg, var(--dark-blood), var(--cli-red));
+}
+
+.progress-fill.purple {
+    background: linear-gradient(90deg, #440044, var(--cli-purple));
+}
+
+.input-group {
+    margin-bottom: 1.5rem;
+}
+
+.input-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-ash);
+    font-family: 'Cinzel', serif;
+}
+
 .input-group input {
     width: 100%;
     padding: 0.8rem;
@@ -577,12 +609,43 @@ body {
     transition: 0.3s;
 }
 
-.submit-btn:hover { background: var(--blood-red); color: white; }
+.submit-btn:hover {
+    background: var(--blood-red);
+    color: white;
+}
 
-@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-.fade-in { animation: fade-in 0.5s ease-out forwards; }
+@keyframes fade-in {
+    from {
+        opacity: 0;
+    }
 
-.loading-state { color: var(--tal-gold); text-align: center; padding: 3rem; font-style: italic; }
-.error-state { color: var(--cli-red); text-align: center; padding: 3rem; }
-.empty-state { text-align: center; padding: 3rem; }
-.empty-state h3 { color: var(--blood-red); font-family: 'Playfair Display', serif; }
+    to {
+        opacity: 1;
+    }
+}
+
+.fade-in {
+    animation: fade-in 0.5s ease-out forwards;
+}
+
+.loading-state {
+    color: var(--tal-gold);
+    text-align: center;
+    padding: 3rem;
+}
+
+.error-state {
+    color: var(--cli-red);
+    text-align: center;
+    padding: 3rem;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+}
+
+.empty-state h3 {
+    color: var(--blood-red);
+    font-family: 'Playfair Display', serif;
+}

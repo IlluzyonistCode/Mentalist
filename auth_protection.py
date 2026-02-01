@@ -504,8 +504,6 @@ class IntegrityChecker:
 	
 
 	def _enter_ghost_mode(self, reason):
-		print(reason)
-		input()
 		self._corruption_flags.append(reason)
 		self._corruption_handler.enter_phantom_mode(reason)
 		

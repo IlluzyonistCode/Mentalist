@@ -30,7 +30,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from itertools import combinations
 from functools import lru_cache
-from playsound import playsound
+from playsound3 import playsound
 from colorama import Back, Fore, Style, init
 from tzlocal import get_localzone
 from datetime import datetime, timedelta
@@ -248,7 +248,7 @@ class Mastermind:
 			
 			if success and server_profiles:
 				try:
-					with open('data/role_profiles.json', 'w', encoding='utf-8') as f:
+					with open('.mentalist_data/role_profiles.json', 'w', encoding='utf-8') as f:
 						json.dump(server_profiles, f, ensure_ascii=False, indent=2)
 
 					print(f'{Style.BRIGHT}{Fore.GREEN}Role profiles synced from Mentalist Server!{Fore.RESET}')
@@ -4514,7 +4514,7 @@ class Booster:
 				self.log_message('warning', 'Play again button timeout - returning to lobby')
 
 				sound_path = get_resource_path(os.path.join('audio', 'glitch.mp3'))
-				playsound(sound_path)
+				playsound(sound_path, block=False)
 
 				try:
 					close_popup_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div')
@@ -5328,7 +5328,7 @@ class Stalker:
 			self.save_targets()
 
 			sound_path = get_resource_path(os.path.join('audio', 'illusionist.mp3'))
-			threading.Thread(target=playsound, args=(sound_path,), daemon=True).start()
+			playsound(sound_path, block=False)
 
 		self.updating = False
 
@@ -6200,7 +6200,7 @@ class Spinner:
 					self.log_state('Complete', 'All spins finished')
 
 					sound_path = get_resource_path(os.path.join('audio', 'confusion.mp3'))
-					playsound(sound_path)
+					playsound(sound_path, block=False)
 
 					return 1
 
@@ -6331,7 +6331,6 @@ class Spinner:
 					self.log_message('info', 'Spinner stopped by user')
 
 					self.kill()
-
 
 					return
 
