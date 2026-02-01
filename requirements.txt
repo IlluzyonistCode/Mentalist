@@ -1,5 +1,6 @@
 colorama
 eel
+nest_asyncio
 ntplib
 pandas
 playsound3

@@ -315,10 +315,9 @@ def tracker_start():
 								phase_locator = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div[1]/div/div/div[1]/div[1]/div/div[2]/div[1]/div[1]/div/div/div[1]/div')
 								phase_text = phase_locator.text_content(timeout=1000)
 
-								if phase_text.isdigit() or \
+								if phase_text.enswith('s') or \
 									phase_text.startswith('Обсуждение') or \
-									phase_text.startswith('Голосование') or \
-									phase_text.enswith('s'):
+									phase_text.startswith('Голосование'):
 
 									game_started = True
 							except:
