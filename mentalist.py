@@ -3441,15 +3441,9 @@ class Tracker:
 						'height': int(self.CHROME_VIEWPORT[1])
 					},
 					headless=False,
-					locale='ru-RU',
-					timezone_id='Europe/Moscow',
-					extra_http_headers={
-						'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
-					},
 					args=[
 						'--window-position=-7,40',
-						'--disable-blink-features=AutomationControlled',
-						'--lang=ru-RU'
+						'--disable-blink-features=AutomationControlled'
 					],
 					ignore_default_args=['--enable-automation'],
 					chromium_sandbox=True
@@ -4671,15 +4665,9 @@ class Booster:
 						'height': int(self.CHROME_VIEWPORT[1])
 					},
 					headless=False,
-					locale='ru-RU',
-					timezone_id='Europe/Moscow',
-					extra_http_headers={
-						'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
-					},
 					args=[
 						'--window-position=-7,40',
-						'--disable-blink-features=AutomationControlled',
-						'--lang=ru-RU'
+						'--disable-blink-features=AutomationControlled'
 					],
 					ignore_default_args=['--enable-automation'],
 					chromium_sandbox=True
@@ -6104,15 +6092,9 @@ class Stalker:
 						'height': int(self.CHROME_VIEWPORT[1])
 					},
 					headless=True,
-					locale='ru-RU',
-					timezone_id='Europe/Moscow',
-					extra_http_headers={
-						'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
-					},
 					args=[
 						'--window-position=-7,40',
-						'--disable-blink-features=AutomationControlled',
-						'--lang=ru-RU'
+						'--disable-blink-features=AutomationControlled'
 					],
 					ignore_default_args=['--enable-automation'],
 					chromium_sandbox=True

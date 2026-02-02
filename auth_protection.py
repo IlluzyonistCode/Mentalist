@@ -9,6 +9,7 @@ from pathlib import Path
 from functools import wraps
 from datetime import datetime
 
+
 def is_frozen():
 	return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
 

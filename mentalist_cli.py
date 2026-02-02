@@ -3,6 +3,7 @@ import sys
 from colorama import Fore, Back, Style, init
 from mentalist import Tracker, Booster, Stalker, Spinner, check_updates_on_startup, banner
 
+
 def main():
 	try:
 		init(autoreset=True)
