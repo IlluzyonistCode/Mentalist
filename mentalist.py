@@ -4263,9 +4263,6 @@ class Booster:
 			if target_player:
 				target_player['locator'].click(timeout=5000)
 				
-				self.log_message('info', f'Using {ability_name} on player {target_number}...')
-			
-			else:
 				self.log_message('success', f'{ability_name.capitalize()} used on player {target_number}!')
 		except Exception as e:
 			self.log_message('error', f'Failed to use {ability_name}: {str(e)[:50]}')
@@ -4273,12 +4270,36 @@ class Booster:
 	def act_villager(self):
 		players, self_number, role = self.get_players_info_villager()
 
+		if role not in ['priest', 'vigilante', 'gunner']:
+			return
+
 		if not self.wait_for_voting_phase():
 			return
 
 		self.log_message('info', 'Analyzing day chat...')
-		
-		target_number = self.analyze_day_chat(self_number)
+
+		target_number = None
+
+		while target_number is None:
+			if self.check_stop_flag():
+				return
+
+			try:
+				continue_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div').get_by_text('Продолжить')
+				
+				if continue_button.is_visible(timeout=1000):
+					self.log_message('info', 'Game ended during chat analysis')
+
+					return
+			except PlaywrightTimeoutError:
+				pass
+
+			target_number = self.analyze_day_chat(self_number)
+			
+			if target_number:
+				break
+
+			time.sleep(2)
 
 		if not target_number:
 			self.log_message('error', 'Target player not found')
