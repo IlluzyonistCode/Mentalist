@@ -50,7 +50,7 @@ init(autoreset=True)
 
 requests.packages.urllib3.disable_warnings()
 
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 MACOS_DISABLE_PLAYWRIGHT_THREADING = (sys.platform == 'darwin')
 
 
@@ -3644,7 +3644,7 @@ class Booster:
 					continue
 			
 			if not rooms_container:
-				self.log_message('error', 'Could not find rooms container')
+				self.log_message('error', 'Rooms menu is empty')
 				
 				return
 			
@@ -4016,7 +4016,7 @@ class Booster:
 							else:
 								has_junior_werewolf = True
 
-						elif ('wolf_seer' in icon or 'wolfseer') in icon and player['self']:
+						elif ('wolf_seer' in icon or 'wolfseer' in icon) and player['self']:
 							role = 'wolf_seer'
 
 						elif 'lovers' in icon:
@@ -4172,18 +4172,18 @@ class Booster:
 			if self.check_stop_flag():
 				return False
 			
+			time.sleep(1.5)
+
 			try:
 				phase_text = phase_locator.text_content(timeout=1000)
 
 				if phase_text == '':
 					empty_text_counter += 1
 
-					if empty_text_counter >= 5:
+					if empty_text_counter == 5:
 						self.log_message('warning', 'Game ended during night phase')
 
 						return False
-
-					time.sleep(1)
 
 					continue
 
@@ -4204,8 +4204,6 @@ class Booster:
 					break
 			except PlaywrightTimeoutError:
 				pass
-			
-			time.sleep(1)
 
 		if voting_started:
 			return True
@@ -4222,14 +4220,23 @@ class Booster:
 		for _ in range(30):
 			if self.check_stop_flag():
 				return False
+
+			time.sleep(1.5)
 			
 			try:
 				phase_text = phase_locator.text_content(timeout=1000)
 
 				if phase_text == '':
-					self.log_message('warning', 'Game ended during discussion phase')
+					empty_text_counter += 1
 
-					return False
+					if empty_text_counter == 5:
+						self.log_message('warning', 'Game ended during discussion phase')
+
+						return False
+
+					continue
+
+				empty_text_counter = 0
 
 				if phase_text.startswith('Голосование'):
 					self.log_message('success', 'Voting phase started!')
@@ -4237,8 +4244,6 @@ class Booster:
 					return True
 			except PlaywrightTimeoutError:
 				pass
-			
-			time.sleep(1)
 
 		self.log_message('warning', 'Voting phase not detected after discussion')
 
@@ -4421,7 +4426,7 @@ class Booster:
 					self.log_message('warning', 'Game not starting for 2 minutes, leaving room...')
 					
 					try:
-						back_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div[1]/div[1]/div[1]/div/div')
+						back_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div[1]/div[1]/div[1]/div/div').first
 						back_button.click(timeout=5000)
 						
 						time.sleep(1)
@@ -4502,7 +4507,7 @@ class Booster:
 						except UnicodeDecodeError:
 							button_text = ''
 							
-						if 'СОЗДАТЬ' in button_text or 'CREATE' in button_text.upper():
+						if 'СОЗДАТЬ' in button_text:
 							try:
 								close_popup_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div')
 	
@@ -4625,15 +4630,8 @@ class Booster:
 				playsound(sound_path, block=False)
 
 				try:
-					close_popup_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div')
-
-					try:
-						button_text = close_popup_button.text_content(timeout=1000)
-					except UnicodeDecodeError:
-						button_text = ''
-						
-					if button_text == 'Окей' or button_text == '':
-						close_popup_button.click()
+					home_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div[2]/div/div/div/div/div/div[1]/div[1]/div[2]/div[2]/div[3]/div[5]/div[1]/div/div')
+					home_button.click(timeout=3000)
 				except PlaywrightTimeoutError:
 					pass
 
@@ -4770,8 +4768,10 @@ class Booster:
 					if self.check_stop_flag():
 						break
 
+					time.sleep(3)
+
 					try:
-						join_new_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[5]/div/div/div[3]/div[3]/div/div')
+						join_new_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div/div[3]/div[3]/div/div')
 						
 						if join_new_button.is_visible(timeout=3000):
 							self.log_message('cyan', 'Found "Join New" prompt, clicking...')
@@ -6486,7 +6486,7 @@ def banner(module=None):
 		message += f'{Fore.RED} | {module}'
 
 	message += f'\n{Style.BRIGHT}{Fore.MAGENTA}by Corruptor{Fore.RESET}\n'
-	message += f'\n{Style.DIM}{Fore.CYAN}Press Ctrl+C to quit{Fore.RESET}\n'
+	message += f'\n{Style.DIM}{Fore.CYAN}Press Ctrl+C to quit{Style.RESET_ALL}\n'
 	message += f'{Style.BRIGHT}{Fore.RED}{"=" * 60}{Fore.RESET}\n'
 
 	print(message)
