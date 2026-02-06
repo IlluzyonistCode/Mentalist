@@ -4065,7 +4065,7 @@ class Booster:
 		if couples and role != 'wolf_seer':
 			vote = True
 
-		return players, couples, self_number, role, vote, tag
+		return players, couples, werewolf_numbers, self_number, role, vote, tag
 
 	def analyze_day_chat(self, self_number):
 		try:
@@ -4340,7 +4340,7 @@ class Booster:
 
 		start_time = time.monotonic()
 
-		players, couples, self_number, wolf_role, vote, tag = self.get_players_info_werewolf()
+		players, couples, werewolf_numbers, self_number, wolf_role, vote, tag = self.get_players_info_werewolf()
 
 		self.log_message('success', 'Players found!')
 
@@ -4351,23 +4351,69 @@ class Booster:
 			self.vote_for_couple(players, couples)
 
 		if tag:
-			self.tag_target(players, self_number, couples, start_time)
+			self.tag_target(players, self_number, couples, werewolf_numbers, start_time)
 
 	def send_couples_message(self, couples):
 		textarea = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div[2]/div/div[2]/div/textarea')
 
 		self.log_message('info', 'Sending message...')
 
-		if len(couples) > 1:
-			message = 'My couples are '
+		templates = [
+			'Mine is {couples} 🔥 Show me yours daddy',
+			'{couples} gonna get it tonight 😈 wbu cutie?',
+			'Dibs on {couples} 💋 Your turn babe',
+			'Me + {couples} = magic ✨ Spill yours',
+			'{couples} looking real snackable rn 🍑 Who\'s your snack?',
+			'Claimed {couples} 😏 Don\'t leave me hanging',
+			'{couples} bout to have a wild night 🌙 Who\'s yours?',
+			'Got {couples} on speed dial 📞💕 Your couple?',
+			'My {couples} hits different 💎 Share yours?',
+			'{couples} and I got plans 😘 What about you?',
+			'Locked down {couples} 🔐 Your move',
+			'{couples} is mine don\'t @ me 💅 Who\'s keeping you busy?',
+			'Manifested {couples} 🕯️✨ Who manifested you?',
+			'{couples} got that rizz 😮‍💨 Show yours',
+			'My little secret: {couples} 🤫 Now you',
+			'{couples} different breed fr 💯 Yours?',
+			'Me & {couples} no cap 🧢 Your couple tho?',
+			'{couples} just built different 🏆 Who you got?',
+			'Vibing with {couples} rn 🎵 Your vibe check?',
+			'{couples} is the one ❤️‍🔥 Spill the tea',
+			'Got {couples} in my corner 👑 Your royalty?',
+			'{couples} living rent free in my head 🧠💕 Yours?',
+			'My {couples} unmatched 💪 Let\'s see yours',
+			'{couples} certified banger 🎯 Show me whatchu got',
+			'Invested in {couples} stocks 📈 Your portfolio?',
+			'{couples} lowkey fire 🔥 Don\'t be shy',
+			'Me x {couples} main character energy ⭐ You?',
+			'{couples} the whole package 📦💝 Unwrap yours',
+			'My duo is {couples} 🎮 Your player 2?',
+			'{couples} no thoughts just vibes ☁️ Yours?',
+			'Riding with {couples} 🏍️💨 Who you riding with?',
+			'{couples} pass the vibe check ✅ Your turn',
+			'Got {couples} on my mind 💭🔥 Who\'s on yours?',
+			'{couples} making moves 💃 Show your dance partner',
+			'My {couples} slaps 👋💥 Yours slap too?',
+			'{couples} chef\'s kiss 👨‍🍳💋 Taste test yours?',
+			'Simping for {couples} 😩💕 Who you simping for?',
+			'{couples} immaculate vibes only 🌊 Your wave?',
+			'My {couples} elite tier 🎖️ Rank yours',
+			'{couples} living the dream 😴💫 Your dreams?',
+			'Obsessed with {couples} ngl 🤷‍♀️❤️ Your obsession?',
+			'{couples} hits the spot 🎯💘 Your bullseye?',
+			'My {couples} premium quality 💎✨ Standard or premium?',
+			'{couples} the blueprint 📐 Your design?',
+			'Bonded with {couples} 🔗 Your connection?',
+			'{couples} straight bussin 😤🔥 Yours bussin too?',
+			'My {couples} S-tier 🏅 What tier is yours?',
+			'{couples} just different energy ⚡ Match my energy',
+			'Stuck on {couples} like glue 🍯 Who you stuck on?',
+			'{couples} got me acting up 😳💕 Who got you?'
+		]
 
-		elif len(couples) == 1:
-			message = 'My couple is '
-
-		else:
-			return
-
-		message += ' '.join([str(couple) for couple in couples])
+		couples_text = ' & '.join([str(couple) for couple in couples]) if len(couples) > 1 else str(couples[0])
+		
+		message = random.choice(templates).format(couples=couples_text)
 
 		textarea.fill(message)
 		textarea.press('Enter')
@@ -4391,7 +4437,7 @@ class Booster:
 		except Exception as e:
 			self.log_message('error', f'Vote failed: {str(e)[:50]}')
 
-	def tag_target(self, players, self_number, couples, start_time):
+	def tag_target(self, players, self_number, couples, werewolf_numbers, start_time):
 		self.log_message('info', 'Finding target...')
 
 		remaining_time = 30 - (time.monotonic() - start_time)
@@ -4404,6 +4450,9 @@ class Booster:
 		if not target:
 			self.log_message('warning', 'Target not found!')
 
+			return
+
+		if target in [couples] + [werewolf_numbers]:
 			return
 
 		self.log_message('success', 'Target found!')
@@ -4419,6 +4468,17 @@ class Booster:
 			self.log_message('success', 'Player tagged!')
 		except Exception as e:
 			self.log_message('error', f'Tag failed: {str(e)[:50]}')
+
+	def send_end_message(self):
+		try:
+			textarea = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div[2]/div/div/div/div/div/div[1]/div[1]/div[2]/div[1]/div/div/div/div[3]/div[2]/div/div/textarea')
+			
+			textarea.fill('GG :)')
+			textarea.press('Enter')
+
+			time.sleep(1)
+		except Exception as e:
+			self.log_message('error', f'Failed to send end message: {str(e)[:50]}')
 
 	def check_stop_flag(self):
 		if hasattr(self, '_stop_event'):
@@ -4622,6 +4682,8 @@ class Booster:
 				self.log_message('info', 'Booster stop requested')
 					
 				return
+
+			self.send_end_message()
 
 			self.log_message('info', 'Exiting...')
 
