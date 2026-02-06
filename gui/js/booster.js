@@ -190,6 +190,8 @@ function parseLogForState(message) {
 
             updateStats();
         }
+    } else if (msg.includes('priest with werewolf couple')) {
+        updateState('action', 'Random shoot');
     } else if (msg.includes('finding players')) {
         updateState('action', 'Scanning players');
     } else if (msg.includes('players found')) {
@@ -225,7 +227,7 @@ function parseLogForState(message) {
     } else if (msg.includes('analyzing day chat') || msg.includes('analyzing night chat')) {
         updateState('action', 'Analyzing chat');
     } else if (msg.includes('no suspicious target')) {
-        updateState('action', 'No threats');
+        updateState('action', 'No target');
     } else if (msg.includes('waiting for voting phase')) {
         updateState('action', 'Waiting for voting phase');
     } else if (msg.includes('voting phase started')) {

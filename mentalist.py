@@ -1033,6 +1033,10 @@ class Tracker:
 				'wolf-shaman',
 				'toxic-wolf'
 			],
+			'random-obscuring-werewolf': [
+				'nightmare-werewolf',
+				'wolf-shaman'
+			],
 			'random-killer': [
 				'arsonist',
 				'bandit',
@@ -1583,6 +1587,12 @@ class Tracker:
 			'team': 'WEREWOLF',
 			'aura': 'EVIL',
 			'name': 'RSPW'
+		}
+
+		roles['random-obscuring-werewolf'] = {
+			'team': 'WEREWOLF',
+			'aura': 'EVIL',
+			'name': 'ROW'
 		}
 
 		roles['random-other'] = {
@@ -3849,6 +3859,8 @@ class Booster:
 
 	def get_players_info_villager(self):
 		players = []
+		couples = []
+		werewolf_couples = []
 		self_number = None
 		role = None
 		role_name = None
@@ -3882,6 +3894,8 @@ class Booster:
 						'self': False,
 						'number': player_number
 					}
+
+					is_werewolf = False
 
 					if not self.player_name:
 						is_self = player_base_locator.evaluate('''
@@ -3926,11 +3940,22 @@ class Booster:
 
 									self.log_message('success', f'You are {article} {role_name}!')
 
+					for icon in icons:
+						if 'wolf' in icon:
+							is_werewolf = True
+
+						if 'lovers' in icon:
+							if not player['self'] and player_number not in couples:
+								couples.append(player_number)
+
+								if is_werewolf:
+									werewolf_couples.append(player_number)
+
 					players.append(player)
 				except (PlaywrightTimeoutError, IndexError):
 					continue
 
-		return players, self_number, role
+		return players, couples, werewolf_couples, self_number, role
 
 	def get_players_info_werewolf(self):
 		players = []
@@ -3970,7 +3995,6 @@ class Booster:
 						'locator': player_base_locator,			
 						'name': name,
 						'self': False,
-						'couple': False,
 						'number': player_number
 					}
 
@@ -4020,8 +4044,6 @@ class Booster:
 							role = 'wolf_seer'
 
 						elif 'lovers' in icon:
-							player['couple'] = True
-
 							if not is_werewolf and player_number not in couples:
 								couples.append(player_number)
 
@@ -4044,24 +4066,6 @@ class Booster:
 			vote = True
 
 		return players, couples, self_number, role, vote, tag
-
-	def act_werewolf(self):
-		self.log_message('info', 'Finding players...')
-
-		start_time = time.monotonic()
-
-		players, couples, self_number, role, vote, tag = self.get_players_info_werewolf()
-
-		self.log_message('success', 'Players found!')
-
-		if couples:
-			self.send_couples_message(couples)
-
-		if vote and couples:
-			self.vote_for_couple(players, couples)
-
-		if tag:
-			self.tag_target(players, self_number, couples, start_time)
 
 	def analyze_day_chat(self, self_number):
 		try:
@@ -4268,7 +4272,7 @@ class Booster:
 			self.log_message('error', f'Failed to use {ability_name}: {str(e)[:50]}')
 
 	def act_villager(self):
-		players, self_number, role = self.get_players_info_villager()
+		players, couples, werewolf_couples, self_number, role = self.get_players_info_villager()
 
 		if role not in ['priest', 'vigilante', 'gunner']:
 			return
@@ -4276,30 +4280,46 @@ class Booster:
 		if not self.wait_for_voting_phase():
 			return
 
-		self.log_message('info', 'Analyzing day chat...')
-
 		target_number = None
 
-		while target_number is None:
-			if self.check_stop_flag():
-				return
-
-			try:
-				continue_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div').get_by_text('Продолжить')
-				
-				if continue_button.is_visible(timeout=1000):
-					self.log_message('info', 'Game ended during chat analysis')
-
-					return
-			except PlaywrightTimeoutError:
-				pass
-
-			target_number = self.analyze_day_chat(self_number)
+		if role == 'priest' and werewolf_couples:
+			self.log_message('warning', 'Priest with werewolf couple - shooting random player')
 			
-			if target_number:
-				break
+			available_targets = [p['number'] for p in players if p['number'] != self_number and p['number'] not in couples]
+			
+			if available_targets:
+				target_number = random.choice(available_targets)
+				
+				self.log_message('info', f'Selected random target: player {target_number}')
 
-			time.sleep(2)
+		else:
+			self.log_message('info', 'Analyzing day chat...')
+
+			while target_number is None:
+				if self.check_stop_flag():
+					return
+
+				time.sleep(2)
+
+				try:
+					continue_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div').get_by_text('Продолжить')
+					
+					if continue_button.is_visible(timeout=1000):
+						self.log_message('info', 'Game ended during chat analysis')
+
+						return
+				except PlaywrightTimeoutError:
+					pass
+
+				potential_target = self.analyze_day_chat(self_number)
+				
+				if potential_target:
+					if potential_target in couples:
+						continue
+					
+					target_number = potential_target
+					
+					break
 
 		if not target_number:
 			self.log_message('error', 'Target player not found')
@@ -4612,6 +4632,19 @@ class Booster:
 				time.sleep(1)
 
 				try:
+					host_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[3]/div[2]/div/div')
+		
+					try:
+						button_text = host_button.text_content(timeout=1000)
+					except UnicodeDecodeError:
+						button_text = ''
+						
+					if button_text == 'Окей' or button_text == '':
+						host_button.click()
+				except PlaywrightTimeoutError:
+					pass
+
+				try:
 					modal_ok_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div')
 
 					try:
@@ -4627,19 +4660,6 @@ class Booster:
 						time.sleep(1)
 
 						continue
-				except PlaywrightTimeoutError:
-					pass
-
-				try:
-					host_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[3]/div[2]/div/div')
-		
-					try:
-						button_text = host_button.text_content(timeout=1000)
-					except UnicodeDecodeError:
-						button_text = ''
-						
-					if button_text == 'Окей' or button_text == '':
-						host_button.click()
 				except PlaywrightTimeoutError:
 					pass
 
