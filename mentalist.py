@@ -203,6 +203,7 @@ def get_resource_path(relative_path):
 BASE_DIR = get_executable_path()
 MENTALIST_DATA_DIR = Path(os.path.join(BASE_DIR, '.mentalist_data'))
 USER_DATA_DIR = Path(os.path.join(BASE_DIR, '.user_data'))
+CONFIG_PATH = Path(os.path.join(BASE_DIR, 'config.txt'))
 
 
 class GameState:
@@ -912,7 +913,7 @@ class Mastermind:
 class Tracker:
 	@require_module_auth('tracker')
 	def __init__(self):
-		self.config = dotenv_values('config.txt')
+		self.config = dotenv_values(CONFIG_PATH)
 		self.is_valid = True
 
 		try:
@@ -3573,7 +3574,7 @@ class Tracker:
 class Booster:
 	@require_module_auth('booster')
 	def __init__(self):
-		self.config = dotenv_values('config.txt')
+		self.config = dotenv_values(CONFIG_PATH)
 		self.is_valid = True
 		self.should_stop = False
 
@@ -4913,7 +4914,7 @@ class Booster:
 class Stalker:
 	@require_module_auth('stalker')
 	def __init__(self):
-		self.config = dotenv_values('config.txt')
+		self.config = dotenv_values(CONFIG_PATH)
 		self.is_valid = True
 
 		try:
@@ -6278,7 +6279,7 @@ class Stalker:
 class Spinner:
 	@require_module_auth('spinner')
 	def __init__(self):
-		self.config = dotenv_values('config.txt')
+		self.config = dotenv_values(CONFIG_PATH)
 		self.is_valid = True
 		self.app = None
 		self.should_stop = False
@@ -6561,7 +6562,7 @@ class Spinner:
 
 def check_updates_on_startup():
 	try:
-		config = dotenv_values('config.txt')
+		config = dotenv_values(CONFIG_PATH)
 
 		if config.get('SERVER_SYNC_ENABLED') != 'true':
 			return

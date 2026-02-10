@@ -16,7 +16,7 @@ import traceback
 import tkinter as tk
 from colorama import Fore, Style, init
 from dotenv import dotenv_values
-from mentalist import Tracker, Stalker, Booster, Spinner
+from mentalist import Tracker, Stalker, Booster, Spinner, CONFIG_PATH
 from updater import EelUpdater
 
 try:
@@ -1005,7 +1005,7 @@ def get_pending_states(module_name):
 @eel.expose
 def check_server_connection():
     try:
-        config = dotenv_values('config.txt')
+        config = dotenv_values(CONFIG_PATH)
 
         if config.get('SERVER_SYNC_ENABLED', 'false').lower() != 'true':
             return {'connected': False, 'reason': 'disabled'}
@@ -1069,7 +1069,7 @@ def check_updates_on_startup():
     global updater_instance
 
     try:
-        config = dotenv_values('config.txt')
+        config = dotenv_values(CONFIG_PATH)
         updater_instance = EelUpdater(
             server_url=config.get('MENTALIST_SERVER_URL'),
             current_version=VERSION,
