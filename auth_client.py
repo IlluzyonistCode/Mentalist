@@ -128,7 +128,7 @@ class AuthClient:
 			pass
 
 	def _enforce_ssl_pinning(self):
-		EXPECTED_FINGERPRINT = 'a5977de6bac33e5cc92cdfa7b758ab279a853b8f9b5af190d1ac0bf308396379'
+		EXPECTED_FINGERPRINT = 'eb8f9963ea4556bc33e5ca6feadaaa81cb9e0f2bb804635a84769625d51f8463'
 		
 		try:
 			parsed = urlparse(self.server_url)
