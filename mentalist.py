@@ -1181,6 +1181,9 @@ class Tracker:
 		tokens = self.page.evaluate('''
 			() => {
 				const authtokens = JSON.parse(localStorage.getItem("authtokens"));
+
+				if (!authtokens) return;
+
 				const cfJwt = localStorage.getItem("cloudflare-turnstile-jwt");
 
 				return {
@@ -1195,6 +1198,9 @@ class Tracker:
 		self.REFRESH_TOKEN = tokens['refreshToken']
 		self.CF_JWT = tokens['cfJwt']
 		
+		if not self.BEARER_TOKEN:
+			return
+
 		self.BEARER_HEADERS = {
 			'Authorization': f'Bearer {self.BEARER_TOKEN}',
 			'Cf-Jwt': self.CF_JWT,
@@ -3763,6 +3769,9 @@ class Booster:
 		tokens = self.page.evaluate('''
 			() => {
 				const authtokens = JSON.parse(localStorage.getItem("authtokens"));
+
+				if (!authtokens) return;
+
 				const cfJwt = localStorage.getItem("cloudflare-turnstile-jwt");
 
 				return {
@@ -3777,6 +3786,9 @@ class Booster:
 		self.REFRESH_TOKEN = tokens['refreshToken']
 		self.CF_JWT = tokens['cfJwt']
 		
+		if not self.BEARER_TOKEN:
+			return
+
 		self.BEARER_HEADERS = {
 			'Authorization': f'Bearer {self.BEARER_TOKEN}',
 			'Cf-Jwt': self.CF_JWT,
@@ -5713,6 +5725,9 @@ class Stalker:
 		tokens = self.page.evaluate('''
 			() => {
 				const authtokens = JSON.parse(localStorage.getItem("authtokens"));
+
+				if (!authtokens) return;
+
 				const cfJwt = localStorage.getItem("cloudflare-turnstile-jwt");
 
 				return {
@@ -5726,6 +5741,9 @@ class Stalker:
 		self.BEARER_TOKEN = tokens['idToken']
 		self.REFRESH_TOKEN = tokens['refreshToken']
 		self.CF_JWT = tokens['cfJwt']
+		
+		if not self.BEARER_TOKEN:
+			return
 		
 		self.BEARER_HEADERS = {
 			'Authorization': f'Bearer {self.BEARER_TOKEN}',
