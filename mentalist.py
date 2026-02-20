@@ -1898,7 +1898,9 @@ class Tracker:
 				'mentions': []
 			})
 
-		self.find_players()
+		players_grid_xpath = self.find_players_grid_xpath()
+
+		self.find_players(players_grid_xpath)
 
 		if not hard:
 			old_players_dict = {old['name']: old for old in PLAYERS_OLD}
@@ -2800,7 +2802,7 @@ class Tracker:
 
 		print(f'{Style.BRIGHT}{Fore.YELLOW}Finding players...')
 
-		container = self.page.locator(f'xpath={players_grid_xpath}')
+		container = self.page.locator(f'xpath={players_grid_xpath}').first
 
 		players_data = container.evaluate('''
 			(grid) => {
@@ -3644,7 +3646,10 @@ class Tracker:
 					self.get_bearer()
 					self.load_css()
 					self.load_modal()
-					self.find_players()
+
+					players_grid_xpath = self.find_players_grid_xpath()
+
+					self.find_players(players_grid_xpath)
 
 					roles = self.find_roles()
 					rotations = self.get_rotations()
@@ -4207,7 +4212,7 @@ class Booster:
 		self.log_message('error', 'Player grid not found')
 
 	def find_players(self, players_grid_xpath):
-		container = self.page.locator(f'xpath={players_grid_xpath}')
+		container = self.page.locator(f'xpath={players_grid_xpath}').first
 
 		return container.evaluate('''
 			(grid) => {
