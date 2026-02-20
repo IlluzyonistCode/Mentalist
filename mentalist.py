@@ -1187,19 +1187,26 @@ class Tracker:
 				const cfJwt = localStorage.getItem("cloudflare-turnstile-jwt");
 
 				return {
-					idToken: authtokens["idToken"],
-					refreshToken: authtokens["refreshToken"],
+					idToken: authtokens["idToken"] || null,
+					refreshToken: authtokens["refreshToken"] || null,
 					cfJwt
 				};
 			}
 		''')
-		
-		self.BEARER_TOKEN = tokens['idToken']
-		self.REFRESH_TOKEN = tokens['refreshToken']
-		self.CF_JWT = tokens['cfJwt']
-		
-		if not self.BEARER_TOKEN:
+
+		if not tokens:
 			return
+
+		id_token = tokens.get('idToken')
+		refresh_token = tokens.get('refreshToken')
+		cf_jwt = tokens.get('cfJwt')
+		
+		if not id_token or not refresh_token:
+			return
+
+		self.BEARER_TOKEN = id_token
+		self.REFRESH_TOKEN = refresh_token
+		self.CF_JWT = cf_jwt
 
 		self.BEARER_HEADERS = {
 			'Authorization': f'Bearer {self.BEARER_TOKEN}',
@@ -1211,8 +1218,7 @@ class Tracker:
 			try:
 				self.auth_client.update_tokens(
 					bearer_token=self.BEARER_TOKEN,
-					refresh_token=self.REFRESH_TOKEN,
-					tracker_keys=self.API_KEYS
+					refresh_token=self.REFRESH_TOKEN
 				)
 			except:
 				pass
@@ -3775,19 +3781,26 @@ class Booster:
 				const cfJwt = localStorage.getItem("cloudflare-turnstile-jwt");
 
 				return {
-					idToken: authtokens["idToken"],
-					refreshToken: authtokens["refreshToken"],
+					idToken: authtokens["idToken"] || null,
+					refreshToken: authtokens["refreshToken"] || null,
 					cfJwt
 				};
 			}
 		''')
-		
-		self.BEARER_TOKEN = tokens['idToken']
-		self.REFRESH_TOKEN = tokens['refreshToken']
-		self.CF_JWT = tokens['cfJwt']
-		
-		if not self.BEARER_TOKEN:
+
+		if not tokens:
 			return
+
+		id_token = tokens.get('idToken')
+		refresh_token = tokens.get('refreshToken')
+		cf_jwt = tokens.get('cfJwt')
+		
+		if not id_token or not refresh_token:
+			return
+
+		self.BEARER_TOKEN = id_token
+		self.REFRESH_TOKEN = refresh_token
+		self.CF_JWT = cf_jwt
 
 		self.BEARER_HEADERS = {
 			'Authorization': f'Bearer {self.BEARER_TOKEN}',
@@ -5731,20 +5744,27 @@ class Stalker:
 				const cfJwt = localStorage.getItem("cloudflare-turnstile-jwt");
 
 				return {
-					idToken: authtokens["idToken"],
-					refreshToken: authtokens["refreshToken"],
+					idToken: authtokens["idToken"] || null,
+					refreshToken: authtokens["refreshToken"] || null,
 					cfJwt
 				};
 			}
 		''')
-		
-		self.BEARER_TOKEN = tokens['idToken']
-		self.REFRESH_TOKEN = tokens['refreshToken']
-		self.CF_JWT = tokens['cfJwt']
-		
-		if not self.BEARER_TOKEN:
+
+		if not tokens:
 			return
+
+		id_token = tokens.get('idToken')
+		refresh_token = tokens.get('refreshToken')
+		cf_jwt = tokens.get('cfJwt')
 		
+		if not id_token or not refresh_token:
+			return
+
+		self.BEARER_TOKEN = id_token
+		self.REFRESH_TOKEN = refresh_token
+		self.CF_JWT = cf_jwt
+
 		self.BEARER_HEADERS = {
 			'Authorization': f'Bearer {self.BEARER_TOKEN}',
 			'Cf-Jwt': self.CF_JWT,
@@ -5755,8 +5775,7 @@ class Stalker:
 			try:
 				self.auth_client.update_tokens(
 					bearer_token=self.BEARER_TOKEN,
-					refresh_token=self.REFRESH_TOKEN,
-					stalker_keys=self.API_KEYS
+					refresh_token=self.REFRESH_TOKEN
 				)
 			except:
 				pass
