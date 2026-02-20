@@ -65,7 +65,7 @@ body {
     color: var(--men-red);
     margin: 0;
     letter-spacing: 2px;
-    text-shadow: 0 0 20px rgba(255, 68, 68, 0.3);
+    text-shadow: 0 0 20px var(--blood-dried);
 }
 
 .back-button {
@@ -116,7 +116,6 @@ body {
     box-shadow: 0 0 15px rgba(255, 237, 78, 0.2);
 }
 
-/* Remaining Roles Panel */
 .remaining-panel {
     background: rgba(8, 5, 5, 0.98);
     border-bottom: 2px solid var(--blood-dried);
@@ -551,7 +550,6 @@ body {
     padding: 2rem;
 }
 
-/* Help Modal Styles */
 .help-content {
     display: flex;
     flex-direction: column;

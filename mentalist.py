@@ -50,9 +50,15 @@ init(autoreset=True)
 
 requests.packages.urllib3.disable_warnings()
 
-VERSION = '1.0.1'
+_launch_mode = 'CLI'
+VERSION = '1.0.2'
 MACOS_DISABLE_PLAYWRIGHT_THREADING = (sys.platform == 'darwin')
 
+
+def set_launch_mode(mode):
+	global _launch_mode
+
+	_launch_mode = mode
 
 def find_chrome_executable():
 	if sys.platform == 'win32':
@@ -954,6 +960,8 @@ class Tracker:
 
 			return
 
+		self.USER_AGENT = generate_random_user_agent(device_type='windows', browser_type='chrome')
+
 		self.API_KEY = self.switch_api_key()
 
 		self.SERVER_ENABLED = self.config.get('SERVER_SYNC_ENABLED', 'false').lower() == 'true'
@@ -1074,8 +1082,6 @@ class Tracker:
 
 		self.BEARER_HEADERS = {}
 
-		self.USER_AGENT = generate_random_user_agent(device_type='windows', browser_type='chrome')
-
 		self.page = None
 		self.day_chat = None
 		self.dead_chat = None
@@ -1172,20 +1178,34 @@ class Tracker:
 		print(f'{Style.BRIGHT}{color}{message}{Fore.RESET}')
 
 	def get_bearer(self):
-		self.BEARER_TOKEN = self.page.evaluate('() => JSON.parse(localStorage.getItem("authtokens"))["idToken"]')
-		self.CF_JWT = self.page.evaluate('() => localStorage.getItem("cloudflare-turnstile-jwt")')
+		tokens = self.page.evaluate('''
+			() => {
+				const authtokens = JSON.parse(localStorage.getItem("authtokens"));
+				const cfJwt = localStorage.getItem("cloudflare-turnstile-jwt");
 
+				return {
+					idToken: authtokens["idToken"],
+					refreshToken: authtokens["refreshToken"],
+					cfJwt
+				};
+			}
+		''')
+		
+		self.BEARER_TOKEN = tokens['idToken']
+		self.REFRESH_TOKEN = tokens['refreshToken']
+		self.CF_JWT = tokens['cfJwt']
+		
 		self.BEARER_HEADERS = {
 			'Authorization': f'Bearer {self.BEARER_TOKEN}',
-			'Cf-Jwt': f'{self.CF_JWT}',
+			'Cf-Jwt': self.CF_JWT,
 			'Ids': '1'
 		}
-
-
+		
 		if hasattr(self, 'auth_client'):
 			try:
 				self.auth_client.update_tokens(
 					bearer_token=self.BEARER_TOKEN,
+					refresh_token=self.REFRESH_TOKEN,
 					tracker_keys=self.API_KEYS
 				)
 			except:
@@ -1307,7 +1327,7 @@ class Tracker:
 					with open(path, 'r') as asset_file:
 						self.ASSETS[asset][module] = asset_file.read()
 		except FileNotFoundError:
-			input(f'{Style.BRIGHT}{Back.RED}{path} not found!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}{path} not found!{Back.RESET}')
 
 			os.abort()
 
@@ -1340,8 +1360,24 @@ class Tracker:
 	def load_modal(self):
 		messages_html = self.ASSETS['messages']['html']
 
-		field = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]')
+		field = None
 
+		for n in range(2, 6):
+			try:
+				candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]')
+				candidate.wait_for(state='visible', timeout=1000)
+
+				field = candidate
+
+				break
+			except PlaywrightTimeoutError:
+				continue
+
+		if not field:
+			self.log_message('error', 'Modal field not found')
+
+			return
+		
 		field.evaluate('''
 			(field, [messages_html]) => {
 				if (!document.querySelector(".modal-header")) {
@@ -2400,6 +2436,7 @@ class Tracker:
 							blocks = messages[m].querySelectorAll("div > span");
 
 							if (!blocks.length || blocks.length >= 3) service_messages.push(messages[m].textContent);
+
 							else player_messages.push(messages[m].textContent);
 						}
 
@@ -2721,6 +2758,20 @@ class Tracker:
 
 		self.parse_chat_messages(player_messages)
 
+	def find_players_grid_xpath(self):
+		for n in range(2, 6):
+			try:
+				candidate = f'/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div'
+
+				test = self.page.locator(f'xpath={candidate}/div[1]/div[1]/div/div[1]/div/div[4]/div/div')
+				test.wait_for(state='visible', timeout=1000)
+
+				return candidate
+			except PlaywrightTimeoutError:
+				continue
+
+		self.log_message('error', 'Player grid not found')
+
 	def set_players_range(self, number=0, start=0, end=16):
 		for player in self.PLAYER_LAYERS[start:end]:
 			self.set_name(player['number'], player['name'], threaded=True)
@@ -2731,30 +2782,57 @@ class Tracker:
 		else:
 			self.DISCOVERED[number - 1] = True
 
-	def find_players(self):
+	def find_players(self, players_grid_xpath):
 		self.DISCOVERED = [False, False]
 		self.PLAYER_LAYERS = []
 
 		print(f'{Style.BRIGHT}{Fore.YELLOW}Finding players...')
 
-		for i in range(1, 5):
-			for j in range(1, 5):
-				try:
-					number = 4 * (i - 1) + j - 1
+		container = self.page.locator(f'xpath={players_grid_xpath}')
 
-					player_layer_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div[1]/div[{i}]/div[{j}]/div')
-					player_name_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div[1]/div[{i}]/div[{j}]/div/div[1]/div/div[4]/div/div')
-					name = player_name_locator.text_content(timeout=1000).split(' ')[1]
+		players_data = container.evaluate('''
+			(grid) => {
+				const results = [];
+				const rows = grid.children;
 
-					self.PLAYER_LAYERS.append({
-						'number': number,
-						'name': name,
-						'locator': player_layer_locator
-					})
+				for (let i = 0; i < rows.length; i++) {
+					const cells = rows[i].children;
 
-					time.sleep(0.1)
-				except PlaywrightTimeoutError:
-					continue
+					for (let j = 0; j < cells.length; j++) {
+						const cell = cells[j].querySelector('div');
+
+						if (!cell) continue;
+
+						const nameEl = cell.querySelector('div:first-child > div > div:nth-child(4) > div > div');
+						const fullName = nameEl ? nameEl.textContent.trim() : null;
+						const name = fullName ? fullName.split(' ').slice(1).join(' ') : null;
+
+						if (!name) continue;
+
+						results.push({
+							i: i + 1,
+							j: j + 1,
+							name: name
+						});
+					}
+				}
+
+				return results;
+			}
+		''')
+
+		for data in players_data:
+			i, j = data['i'], data['j']
+			name = data['name']
+			number = 4 * (i - 1) + j - 1
+
+			player_cell_locator = self.page.locator(f'xpath={players_grid_xpath}/div[{i}]/div[{j}]/div')
+
+			self.PLAYER_LAYERS.append({
+				'number': number,
+				'name': name,
+				'locator': player_cell_locator
+			})
 
 		if len(self.API_KEYS) >= 2:
 			if MACOS_DISABLE_PLAYWRIGHT_THREADING:
@@ -2784,7 +2862,23 @@ class Tracker:
 	def find_roles(self):
 		print(f'{Style.BRIGHT}{Fore.YELLOW}Finding roles...')
 
-		roles_base_locator = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[2]/div')
+		roles_base_locator = None
+
+		for n in range(2, 6):
+			try:
+				candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[2]/div')
+				candidate.wait_for(state='visible', timeout=1000)
+
+				roles_base_locator = candidate
+
+				break
+			except PlaywrightTimeoutError:
+				continue
+
+		if not roles_base_locator:
+			print(f'{Style.BRIGHT}{Fore.RED}Roles panel not found!')
+
+			return []
 
 		rotation_icons = roles_base_locator.evaluate('''
 			(locator) => {
@@ -2804,6 +2898,7 @@ class Tracker:
 
 		for rotation_icon in rotation_icons:
 			rotation_icon = rotation_icon.replace('@3x', '')
+
 			if 'roleIcons' in rotation_icon and 'random' not in rotation_icon:
 				rotation_icon = rotation_icon.split('roleIcons/')[1]
 
@@ -2822,9 +2917,6 @@ class Tracker:
 						self.ROTATION_ICONS[role] = icon
 
 						break
-
-				else:
-					input(rotation_icon, 'not found!')
 
 			else:
 				role = rotation_icon.split('icon_')[1].split('_filled')[0]
@@ -2902,8 +2994,20 @@ class Tracker:
 				'mentions': []
 			})
 
-		self.day_chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div/div').first
-		self.dead_chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div[1]/div')
+		self.day_chat = None
+		self.dead_chat = None
+
+		for n in range(2, 6):
+			try:
+				candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div/div')
+				candidate.wait_for(state='visible', timeout=1000)
+
+				self.day_chat = candidate.first
+				self.dead_chat = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div[1]/div')
+
+				break
+			except PlaywrightTimeoutError:
+				continue
 
 		self.mastermind = Mastermind(self)
 
@@ -3464,11 +3568,16 @@ class Tracker:
 
 				while True:
 					try:
-						self.page.goto('https://wolvesville.com', wait_until='commit', timeout=120000)
+						self.page.goto('https://wolvesville.com', wait_until='domcontentloaded', timeout=120000)
+
+						try:
+							self.page.wait_for_load_state('networkidle', timeout=30000)
+						except PlaywrightTimeoutError:
+							pass
 
 						break
 					except PlaywrightTimeoutError:
-						print(f'{Style.BRIGHT}{Fore.RED}Timeout error!{Fore.RESET}')
+						self.log_message('error', 'Timeout error, retrying...')
 
 						continue
 
@@ -3486,7 +3595,24 @@ class Tracker:
 
 					while True:
 						try:
-							phase_locator = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div[1]/div/div/div[1]/div[1]/div/div[2]/div[1]/div[1]/div/div/div[1]/div').first
+							phase_locator = None
+
+							for n in range(2, 6):
+								try:
+									candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[1]/div/div/div[1]/div')
+									candidate.wait_for(state='visible', timeout=500)
+
+									phase_locator = candidate.first
+
+									break
+								except PlaywrightTimeoutError:
+									continue
+
+							if not phase_locator:
+								time.sleep(1)
+
+								continue
+
 							phase_text = phase_locator.text_content(timeout=1000)
 
 							if phase_text.endswith('s') or \
@@ -3494,10 +3620,10 @@ class Tracker:
 								phase_text.startswith('Голосование'):
 
 								break
-						except KeyboardInterrupt:
-							return
 						except PlaywrightTimeoutError:
 							pass
+						except KeyboardInterrupt:
+							return
 
 						time.sleep(1)
 
@@ -3534,6 +3660,8 @@ class Tracker:
 							self.update_players()
 		except KeyboardInterrupt:
 			return
+		except AttributeError:
+			pass
 		except Exception as e:
 			input(f'\n{Style.BRIGHT}{Back.RED}{str(e)}{Back.RESET}')
 
@@ -3594,20 +3722,25 @@ class Booster:
 		try:
 			self.CHROME_VIEWPORT = self.config['CHROME_VIEWPORT'].split(',')
 		except KeyError:
-			input(f'{Style.BRIGHT}{Back.RED}Booster Error: Browser Viewport not found!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Booster Error: Browser Viewport not found!{Back.RESET}')
 
 			self.is_valid = False
 
 			return
 
 		if len(self.CHROME_VIEWPORT) != 2:
-			input(f'{Style.BRIGHT}{Back.RED}Booster Error: Browser Viewport is invalid!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Booster Error: Browser Viewport is invalid!{Back.RESET}')
 
 			self.is_valid = False
 
 			return
 
 		self.USER_AGENT = generate_random_user_agent(device_type='windows', browser_type='chrome')
+
+		self.BEARER_TOKEN = None
+		self.CF_JWT = None
+
+		self.BEARER_HEADERS = {}
 
 		self.context = None
 		self.page = None
@@ -3626,57 +3759,161 @@ class Booster:
 
 		print(f'{Style.BRIGHT}{color}{message}{Fore.RESET}')
 
+	def get_bearer(self):
+		tokens = self.page.evaluate('''
+			() => {
+				const authtokens = JSON.parse(localStorage.getItem("authtokens"));
+				const cfJwt = localStorage.getItem("cloudflare-turnstile-jwt");
+
+				return {
+					idToken: authtokens["idToken"],
+					refreshToken: authtokens["refreshToken"],
+					cfJwt
+				};
+			}
+		''')
+		
+		self.BEARER_TOKEN = tokens['idToken']
+		self.REFRESH_TOKEN = tokens['refreshToken']
+		self.CF_JWT = tokens['cfJwt']
+		
+		self.BEARER_HEADERS = {
+			'Authorization': f'Bearer {self.BEARER_TOKEN}',
+			'Cf-Jwt': self.CF_JWT,
+			'Ids': '1'
+		}
+		
+		if hasattr(self, 'auth_client'):
+			try:
+				self.auth_client.update_tokens(
+					bearer_token=self.BEARER_TOKEN,
+					refresh_token=self.REFRESH_TOKEN
+				)
+			except:
+				pass
+
+	def ensure_english_language(self):
+		for n in range(2, 6):
+			try:
+				flag_xpath = f'/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div/div/div[1]/div[1]/div[2]/div[3]/div/div/div/div/div[3]/div/div/div/div/div/img'
+				flag_img = self.page.locator(f'xpath={flag_xpath}').first
+				flag_img.wait_for(state='visible', timeout=1000)
+
+				src = flag_img.get_attribute('src', timeout=2000) or ''
+
+				if 'flag_en' in src:
+					return
+
+				self.log_message('warning', f'Non-English language detected, switching...')
+
+				flag_img.click(timeout=5000)
+
+				time.sleep(0.5)
+
+				dropdown_xpath = f'/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div/div/div[1]/div[1]/div[2]/div[3]/div/div/div/div/div[3]/div[2]/div[2]/div/div/div'
+				dropdown = self.page.locator(f'xpath={dropdown_xpath}').first
+				dropdown.wait_for(state='visible', timeout=3000)
+
+				english_option = dropdown.get_by_text('English', exact=True).first
+				english_option.click(timeout=5000)
+
+				time.sleep(0.5)
+
+				self.log_message('success', 'Language switched to English!')
+
+				return
+			except PlaywrightTimeoutError:
+				continue
+
+		self.log_message('warning', 'Language flag element not found, skipping check')
+
 	def find_suitable_room(self):
 		if self.check_stop_flag():
-			return
+			return None, None, False
 
 		self.log_message('info', 'Scanning rooms...')
 
-		time.sleep(1)
-		
 		try:
-			xpath_variants = [
-				'/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div[1]/div[1]/div/div[3]/div/div/div/div/div[2]/div[2]/div[1]/div/div/div/div',
-				'/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div[1]/div[1]/div/div/div/div/div/div/div[2]/div[2]/div[1]/div/div/div/div'
-			]
-			
 			rooms_container = None
 			active_xpath = None
 
-			for xpath in xpath_variants:
+			all_candidates = self.page.locator('xpath=//div/div[2]/div[2]/div[1]/div/div/div/div').all()
+
+			for candidate in all_candidates:
 				try:
-					container = self.page.locator(f'xpath={xpath}').first
-					container.wait_for(state='visible', timeout=3000)
-					rooms_container = container
-					active_xpath = xpath
+					count = candidate.evaluate('(el) => el.children.length;', timeout=500)
 
-					break
-				except PlaywrightTimeoutError:
-					continue
-			
-			if not rooms_container:
-				self.log_message('error', 'Rooms menu is empty')
-				
-				return
-			
-			room_count = rooms_container.evaluate('(container) => container.children.length;', timeout=10000)
-			
-			self.log_message('cyan', f'Found {room_count} rooms')
-			
-			for i in range(1, room_count + 1):
-				if self.check_stop_flag():
-					return
-
-			for i in range(1, room_count + 1):
-				try:
-					room_base = f'{active_xpath}/div[{i}]/div/div'
-					room_name_locator = self.page.locator(f'xpath={room_base}/div[1]/div[2]/div[1]')
-					room_name = room_name_locator.text_content(timeout=2000).lower()
-
-					if 'vill win' not in room_name or 'bqt' in room_name:
+					if count < 1:
 						continue
 
-					player_count_locator = self.page.locator(f'xpath={room_base}/div[1]/div[5]')
+					first_child_text = candidate.evaluate('''
+						(el) => {
+							try {
+								return el.children[0].querySelector('div').textContent || '';
+							} catch(e) {
+								return '';
+							}
+						}
+					''', timeout=500)
+
+					if not first_child_text or len(first_child_text.strip()) < 3:
+						continue
+
+					if any(ui_text in first_child_text.upper() for ui_text in ['БЫСТРАЯ', 'СОЗДАТЬ', 'ИГРАТЬ', 'CUSTOM', 'QUICK', 'CREATE']):
+						continue
+
+					rooms_container = candidate
+
+					active_xpath = candidate.evaluate('''
+						(el) => {
+							let path = '';
+							let node = el;
+
+							while (node && node.nodeType === Node.ELEMENT_NODE) {
+								let index = 1;
+								let sibling = node.previousElementSibling;
+
+								while (sibling) {
+									if (sibling.tagName === node.tagName) index++;
+									sibling = sibling.previousElementSibling;
+								}
+
+								path = '/' + node.tagName.toLowerCase() + (index > 1 ? `[${index}]` : '') + path;
+								node = node.parentElement;
+							}
+
+							return path;
+						}
+					''', timeout=500)
+
+					break
+				except:
+					continue
+
+			if not rooms_container:
+				self.log_message('error', 'Rooms menu is empty')
+
+				return None, None, True
+
+			room_count = rooms_container.evaluate('(container) => container.children.length;', timeout=5000)
+
+			self.log_message('cyan', f'Found {room_count} rooms')
+
+			for i in range(1, room_count + 1):
+				if self.check_stop_flag():
+					return None, None, False
+
+				try:
+					room_base = f'{active_xpath}/div[{i}]/div/div/div'
+					room_name_locator = self.page.locator(f'xpath={room_base}/div[2]')
+					room_name = room_name_locator.text_content(timeout=2000).lower()
+
+					if ('vill win' not in room_name \
+						and 'ᴠɪʟʟ ᴡɪɴ' not in room_name) \
+						or 'bqt' in room_name:
+						continue
+
+					player_count_locator = self.page.locator(f'xpath={room_base}/div[5]')
 					player_count_text = player_count_locator.text_content(timeout=2000)
 
 					if not player_count_text.isdigit():
@@ -3686,100 +3923,132 @@ class Booster:
 
 					if player_count > 6:
 						continue
-			
-					xp_icon_locator = self.page.locator(f'xpath={room_base}/div[1]/div[3]/img')
+
+					xp_icon_locator = self.page.locator(f'xpath={room_base}/div[1]/img')
 
 					if not xp_icon_locator.is_visible(timeout=2000):
 						continue
 
 					self.log_message('success', f'Found suitable room: {room_name} ({player_count}/8)')
-					
-					return i
+
+					return i, active_xpath, False
 				except PlaywrightTimeoutError:
 					continue
+
 		except Exception as e:
 			if 'strict mode violation' in str(e):
 				self.log_message('error', 'Multiple room containers detected, using first')
-
+			
 			else:
 				self.log_message('error', f'Error scanning rooms: {str(e)[:100]}')
 
-	def join_room(self, room_index):
+		return None, None, False
+
+	def join_room(self, room_index, active_xpath):
 		if self.check_stop_flag():
 			return False
 
 		try:
 			self.log_message('info', f'Joining room #{room_index}...')
 
-			xpath_variants = [
-				f'/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div[1]/div[1]/div/div[3]/div/div/div/div/div[2]/div[2]/div[1]/div/div/div/div/div[{room_index}]/div/div',
-				f'/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div[1]/div[1]/div/div/div/div/div/div/div[2]/div[2]/div[1]/div/div/div/div/div[{room_index}]/div/div'
-			]
-			
+			room_xpath = f'{active_xpath}/div[{room_index}]/div/div'
 			room_locator = None
 
-			for xpath in xpath_variants:
+			try:
+				locator = self.page.locator(f'xpath={room_xpath}').first
+				locator.wait_for(state='visible', timeout=3000)
+
+				room_locator = locator
+			except PlaywrightTimeoutError:
+				self.log_message('error', 'Could not find room to join')
+
+				return False
+
+			room_locator.click(timeout=5000)
+
+			join_button = None
+
+			time.sleep(0.5)
+
+			for n in range(4, 8):
 				try:
-					locator = self.page.locator(f'xpath={xpath}').first
-					locator.wait_for(state='visible', timeout=2000)
+					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[3]/div[2]/div/div').first
 
-					room_locator = locator
+					try:
+						btn_text = candidate.text_content(timeout=500)
+					except UnicodeDecodeError:
+						btn_text = ''
 
-					break
+					if btn_text == 'Присоединиться':
+						join_button = candidate
+
+						break
 				except PlaywrightTimeoutError:
 					continue
-			
-			if not room_locator:
-				self.log_message('error', 'Could not find room to join')
-				
-				return False
-			
-			room_locator.click(timeout=5000)
-			
-			time.sleep(1)
 
-			join_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[3]/div[2]/div/div')
+			if not join_button:
+				self.log_message('warning', 'Join button not found, closing modal and retrying...')
+
+				for n in range(4, 8):
+					try:
+						cancel_btn = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[3]/div[1]/div').first
+
+						try:
+							btn_text = cancel_btn.text_content(timeout=500)
+						except UnicodeDecodeError:
+							btn_text = ''
+
+						if btn_text == 'Отмена' or btn_text == '':
+							cancel_btn.click()
+
+							break
+					except PlaywrightTimeoutError:
+						continue
+
+				time.sleep(1)
+
+				return False
+
 			join_button.click(timeout=5000)
-			
+
 			time.sleep(1)
 
 			try:
-				modal_buttons = [
-					f'/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div',
-					f'/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[3]/div[1]/div'
-				]
+				for n in range(4, 8):
+					for modal_xpath in [
+						f'/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[2]/div/div/div',
+						f'/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[3]/div[1]/div'
+					]:
+						try:
+							locator = self.page.locator(f'xpath={modal_xpath}').first
 
-				for modal_button in modal_buttons:
-					try:
-						locator = self.page.locator(f'xpath={modal_button}').first
+							if locator.is_visible(timeout=500):
+								try:
+									button_text = locator.text_content(timeout=500)
+								except UnicodeDecodeError:
+									button_text = ''
 
-						if locator.is_visible(timeout=500):
-							try:
-								button_text = locator.text_content(timeout=500)
-							except UnicodeDecodeError:
-								button_text = ''
-							
-							if button_text in ['Окей', 'Отмена', '']:
-								self.log_message('warning', 'Game already started, retrying...')
-								
-								locator.click()
-								
-								time.sleep(1)
+								if button_text == 'Окей':
+									self.log_message('warning', 'Game already started, retrying...')
 
-								return False
-					except PlaywrightTimeoutError:
-						continue
+									locator.click()
+
+									time.sleep(1)
+
+									return False
+						except PlaywrightTimeoutError:
+							continue
 			except:
 				pass
-			
+
 			self.log_message('success', 'Successfully joined room!')
 
 			time.sleep(1)
-			
+
 			return True
 		except Exception as e:
 			self.log_message('error', f'Failed to join room: {str(e)[:100]}')
-			
+
 			return False
 
 	def refresh_rooms(self):
@@ -3787,33 +4056,73 @@ class Booster:
 			return
 
 		try:
-			refresh_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div[1]/div[1]/div/div/div/div/div/div/div[2]/div[2]/div[2]/div[2]/div/div/div')
+			refresh_button = None
+
+			for n in range(2, 5):
+				try:
+					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div/div/div[1]/div[1]/div[2]/div[3]/div/div/div/div/div[2]/div[2]').get_by_text('ОБНОВИТЬ', exact=True).first
+
+					if candidate.is_visible(timeout=1000):
+						refresh_button = candidate
+
+						break
+				except PlaywrightTimeoutError:
+					continue
+
+			if not refresh_button:
+				refresh_button = self.page.get_by_text('ОБНОВИТЬ', exact=True).first
+
 			refresh_button.click(timeout=5000)
-			
+
 			time.sleep(1)
-			
+
 			self.log_message('cyan', 'Refreshed room list')
 		except Exception as e:
 			self.log_message('error', f'Failed to refresh: {str(e)[:100]}')
 
 	def auto_find_and_join(self):
+		empty_count = 0
+
 		while True:
 			if self.check_stop_flag():
 				return False
-			
-			room_index = self.find_suitable_room()
-			
+
+			room_index, active_xpath, is_empty = self.find_suitable_room()
+
 			if room_index:
-				if self.join_room(room_index):
+				empty_count = 0
+
+				if self.join_room(room_index, active_xpath):
 					return True
 
-				else:
-					self.refresh_rooms()
+				self.refresh_rooms()
+
 			else:
-				self.log_message('warning', 'No suitable rooms found, waiting 5 seconds...')
+				self.log_message('warning', 'No suitable rooms found, refreshing...')
+
+				if is_empty:
+					empty_count += 1
 				
-				time.sleep(5)
-				
+				else:
+					empty_count = 0
+
+				if empty_count >= 5:
+					self.log_message('warning', 'Rooms menu empty too many times, reloading page...')
+
+					try:
+						self.page.reload(wait_until='domcontentloaded', timeout=120000)
+
+						try:
+							self.page.wait_for_load_state('networkidle', timeout=30000)
+						except PlaywrightTimeoutError:
+							pass
+					except:
+						pass
+
+					empty_count = 0
+
+					return False
+
 				self.refresh_rooms()
 
 	def get_role_name_from_icon(self, icon):
@@ -3858,6 +4167,63 @@ class Booster:
 		
 		return 'an' if first_letter in vowels else 'a'
 
+	def find_players_grid_xpath(self):
+		for n in range(2, 6):
+			try:
+				candidate = f'/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div'
+
+				test = self.page.locator(f'xpath={candidate}/div[1]/div[1]/div/div[1]/div/div[4]/div/div')
+				test.wait_for(state='visible', timeout=1000)
+
+				return candidate
+			except PlaywrightTimeoutError:
+				continue
+
+		self.log_message('error', 'Player grid not found')
+
+	def find_players(self, players_grid_xpath):
+		container = self.page.locator(f'xpath={players_grid_xpath}')
+
+		return container.evaluate('''
+			(grid) => {
+				const results = [];
+				const rows = grid.children;
+
+				for (let i = 0; i < rows.length; i++) {
+					const cells = rows[i].children;
+
+					for (let j = 0; j < cells.length; j++) {
+						const cell = cells[j].querySelector('div');
+
+						if (!cell) continue;
+
+						const nameEl = cell.querySelector('div:first-child > div > div:nth-child(4) > div > div');
+						const fullName = nameEl ? nameEl.textContent.trim() : null;
+						const name = fullName ? fullName.split(' ').slice(1).join(' ') : null;
+
+						if (!name) continue;
+
+						const images = cell.getElementsByTagName('img');
+						const icons = [];
+
+						for (const img of images) icons.push(img.src);
+
+						const isSelf = cell.querySelectorAll('div[style*="rgb(236, 64, 122)"]').length > 0;
+
+						results.push({
+							i: i + 1,
+							j: j + 1,
+							name: name,
+							icons: icons,
+							is_self: isSelf
+						});
+					}
+				}
+
+				return results;
+			}
+		''')
+
 	def get_players_info_villager(self):
 		players = []
 		couples = []
@@ -3866,95 +4232,77 @@ class Booster:
 		role = None
 		role_name = None
 
-		for i in range(1, 5):
-			for j in range(1, 5):
-				try:
-					time.sleep(0.1)
+		players_grid_xpath = self.find_players_grid_xpath()
 
-					player_base_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div/div[{i}]/div[{j}]/div')
-					player_img_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div/div[{i}]/div[{j}]/div')
+		if not players_grid_xpath:
+			return players, couples, werewolf_couples, self_number, role
 
-					name = player_base_locator.text_content(timeout=1000).split(' ')[1]
-					icons = player_img_locator.evaluate('''
-						(player) => {
-							let sources = [];
+		try:
+			players_data = self.find_players(players_grid_xpath)
+		except Exception as e:
+			self.log_message('error', f'Failed to find players: {str(e)[:100]}')
+			
+			return players, couples, werewolf_couples, self_number, role
 
-							const images = player.getElementsByTagName("img");
+		for data in players_data:
+			i, j = data['i'], data['j']
+			name = data['name']
+			icons = data['icons']
+			is_self_flag = data['is_self']
 
-							for (image of images) sources.push(image.src);
+			player_cell_locator = self.page.locator(f'xpath={players_grid_xpath}/div[{i}]/div[{j}]/div')
+			player_number = 4 * (i - 1) + j
 
-							return sources;
-						}
-					''')
+			player = {
+				'locator': player_cell_locator,
+				'name': name,
+				'self': False,
+				'number': player_number
+			}
 
-					player_number = 4 * (i - 1) + j
+			is_werewolf = False
 
-					player = {
-						'locator': player_base_locator,			
-						'name': name,
-						'self': False,
-						'number': player_number
-					}
+			if not self.player_name and is_self_flag:
+				self.player_name = name
 
-					is_werewolf = False
+				self.log_message('cyan', f'Detected player name: {self.player_name}')
 
-					if not self.player_name:
-						is_self = player_base_locator.evaluate('''
-							(player) => {
-								const allDivs = player.querySelectorAll('div');
-								
-								for (let div of allDivs) {
-									const style = div.getAttribute('style');
+			if self.player_name and name == self.player_name:
+				player['self'] = True
+				self_number = player_number
 
-									if (style && style.includes('rgb(236, 64, 122)')) return true;
-								}
+				for icon in icons:
+					if 'priest' in icon:
+						role = 'priest'
 
-								return false;
-							}
-						''', timeout=1000)
-						
-						if is_self:
-							self.player_name = name
+					elif 'vigilante' in icon:
+						role = 'vigilante'
 
-							self.log_message('cyan', f'Detected player name: {self.player_name}')
+					elif 'gunner' in icon:
+						role = 'gunner'
 
-					if self.player_name and name == self.player_name:
-						player['self'] = True
-						self_number = player_number
+					if player['self'] and 'icon_' in icon and role_name is None:
+						extracted_role = self.get_role_name_from_icon(icon)
 
-						for icon in icons:
-							if 'priest' in icon:
-								role = 'priest'
+						if extracted_role:
+							role_name = extracted_role
+							article = self.get_article(role_name)
+							
+							self.log_message('success', f'You are {article} {role_name}!')
 
-							elif 'vigilante' in icon:
-								role = 'vigilante'
+			for icon in icons:
+				if 'wolf' in icon:
+					is_werewolf = True
 
-							elif 'gunner' in icon:
-								role = 'gunner'
+			for icon in icons:
+				if 'lovers' in icon:
+					if not player['self'] and player_number not in couples:
+						couples.append(player_number)
 
-							if player['self'] and 'icon_' in icon and role_name is None:
-								extracted_role = self.get_role_name_from_icon(icon)
+						if is_werewolf:
+							werewolf_couples.append(player_number)
 
-								if extracted_role:
-									role_name = extracted_role
-									article = self.get_article(role_name)
-
-									self.log_message('success', f'You are {article} {role_name}!')
-
-					for icon in icons:
-						if 'wolf' in icon:
-							is_werewolf = True
-
-						if 'lovers' in icon:
-							if not player['self'] and player_number not in couples:
-								couples.append(player_number)
-
-								if is_werewolf:
-									werewolf_couples.append(player_number)
-
-					players.append(player)
-				except (PlaywrightTimeoutError, IndexError):
-					continue
+			players.append(player)
 
 		return players, couples, werewolf_couples, self_number, role
 
@@ -3969,98 +4317,77 @@ class Booster:
 		vote = False
 		tag = False
 
-		for i in range(1, 5):
-			for j in range(1, 5):
-				try:
-					time.sleep(0.1)
+		players_grid_xpath = self.find_players_grid_xpath()
 
-					player_base_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div/div[{i}]/div[{j}]/div')
-					player_img_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div/div[{i}]/div[{j}]/div')
+		if not players_grid_xpath:
+			return players, couples, werewolf_numbers, self_number, role, vote, tag
 
-					name = player_base_locator.text_content(timeout=1000).split(' ')[1]
-					icons = player_img_locator.evaluate('''
-						(player) => {
-							let sources = [];
+		try:
+			players_data = self.find_players(players_grid_xpath)
+		except Exception as e:
+			self.log_message('error', f'Failed to find players: {str(e)[:100]}')
+			
+			return players, couples, werewolf_numbers, self_number, role, vote, tag
 
-							const images = player.getElementsByTagName("img");
+		for data in players_data:
+			i, j = data['i'], data['j']
+			name = data['name']
+			icons = data['icons']
+			is_self_flag = data['is_self']
 
-							for (image of images) sources.push(image.src);
+			player_cell_locator = self.page.locator(f'xpath={players_grid_xpath}/div[{i}]/div[{j}]/div')
+			player_number = 4 * (i - 1) + j
 
-							return sources;
-						}
-					''')
+			player = {
+				'locator': player_cell_locator,
+				'name': name,
+				'self': False,
+				'number': player_number
+			}
 
-					player_number = 4 * (i - 1) + j
+			is_werewolf = False
 
-					player = {
-						'locator': player_base_locator,			
-						'name': name,
-						'self': False,
-						'number': player_number
-					}
+			if not self.player_name and is_self_flag:
+				self.player_name = name
 
-					is_werewolf = False
+				self.log_message('cyan', f'Detected player name: {self.player_name}')
 
-					if not self.player_name:
-						is_self = player_base_locator.evaluate('''
-							(player) => {
-								const allDivs = player.querySelectorAll('div');
-								
-								for (let div of allDivs) {
-									const style = div.getAttribute('style');
+			if self.player_name and name == self.player_name:
+				player['self'] = True
+				self_number = player_number
+				is_werewolf = True
+				werewolf_numbers.append(player_number)
 
-									if (style && style.includes('rgb(236, 64, 122)')) return true;
-								}
+			for icon in icons:
+				if not player['self'] and 'wolf' in icon:
+					is_werewolf = True
+					werewolf_numbers.append(player_number)
 
-								return false;
-							}
-						''', timeout=1000)
+				if 'junior' in icon or 'split' in icon:
+					if player['self']:
+						tag = True
+						role = 'junior_werewolf'
+					else:
+						has_junior_werewolf = True
+
+				elif ('wolf_seer' in icon or 'wolfseer' in icon) and player['self']:
+					role = 'wolf_seer'
+
+				elif 'lovers' in icon:
+					if not is_werewolf and player_number not in couples:
+						couples.append(player_number)
+
+				if player['self'] and 'icon_' in icon and role_name is None:
+					extracted_role = self.get_role_name_from_icon(icon)
+
+					if extracted_role:
+						role_name = extracted_role
+						article = self.get_article(role_name)
 						
-						if is_self:
-							self.player_name = name
+						self.log_message('error', f'You are {article} {role_name}!')
 
-							self.log_message('cyan', f'Detected player name: {self.player_name}')
+			players.append(player)
 
-					if self.player_name and name == self.player_name:
-						player['self'] = True
-						self_number = player_number
-						is_werewolf = True
-						werewolf_numbers.append(player_number)
-
-					for icon in icons:
-						if not player['self'] and 'wolf' in icon:
-							is_werewolf = True
-
-							werewolf_numbers.append(player_number)
-
-						if 'junior' in icon or 'split' in icon:
-							if player['self']:
-								tag = True
-								role = 'junior_werewolf'
-
-							else:
-								has_junior_werewolf = True
-
-						elif ('wolf_seer' in icon or 'wolfseer' in icon) and player['self']:
-							role = 'wolf_seer'
-
-						elif 'lovers' in icon:
-							if not is_werewolf and player_number not in couples:
-								couples.append(player_number)
-
-						if player['self'] and 'icon_' in icon and role_name is None:
-							extracted_role = self.get_role_name_from_icon(icon)
-
-							if extracted_role:
-								role_name = extracted_role
-								article = self.get_article(role_name)
-
-								self.log_message('warning', f'You are {article} {role_name}!')
-
-					players.append(player)
-				except (PlaywrightTimeoutError, IndexError):
-					continue
-		
 		couples = [c for c in couples if c not in werewolf_numbers]
 
 		if couples and role != 'wolf_seer':
@@ -4070,32 +4397,57 @@ class Booster:
 
 	def analyze_day_chat(self, self_number):
 		try:
-			chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div[1]/div/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div/div').first
+			chat = None
 
-			messages = chat.evaluate('''
-				(chat) => {
+			for n in range(2, 6):
+				try:
+					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div/div').first
+					candidate.wait_for(state='visible', timeout=1000)
+
+					chat = candidate
+
+					break
+				except PlaywrightTimeoutError:
+					continue
+
+			if not chat:
+				return
+
+			if not hasattr(self, 'last_day_message_index'):
+				self.last_day_message_index = 0
+
+			result = chat.evaluate('''
+				(chat, lastIndex) => {
 					let messages = [];
-
 					const blocks = chat.getElementsByTagName("div");
-
+					
 					for (block of blocks) {
 						const text = block.textContent;
 
 						if (text && !messages.includes(text)) messages.push(text);
 					}
+					
+					let newMessages = [];
 
-					return messages;
+					for (let i = lastIndex; i < messages.length; i++)
+						newMessages.push(messages[i]);
+					
+					return [newMessages, messages.length];
 				}
-			''')
+			''', self.last_day_message_index)
 
-			for message in messages:
+			new_messages, total_count = result
+
+			self.last_day_message_index = total_count
+
+			for message in new_messages:
 				if ': ' not in message:
 					continue
 
-				player_info, message_text = message.split(': ', 1)
+				player, message = message.split(': ', 1)
 				
 				try:
-					number, player_name = player_info.split(' ', 1)
+					number, name = player.split(' ', 1)
 					number = int(number)
 				except (ValueError, IndexError):
 					continue
@@ -4103,29 +4455,40 @@ class Booster:
 				if number == self_number:
 					continue
 
-				message_lower = message_text.lower().strip()
+				message_lower = message.lower().strip()
 
 				if message_lower in ['m', 'me', 'wc']:
-					self.log_message('warning', f'Suspicious message from player {number}: "{message_text}"')
+					self.log_message('warning', f'Suspicious message from player {number}: "{message}"')
 					
 					return number
 
-				words = message_text.split()
+				words = message.split()
 
 				for word in words:
-					if word.isdigit():
-						word_num = int(word)
-
-						if 1 <= word_num <= 16:
-							self.log_message('warning', f'Player {number} mentioned number {word_num}')
-							
-							return number
+					if word.isdigit() and 1 <= int(word) <= 16:
+						self.log_message('warning', f'Player {number} mentioned number {int(word)}')
+						
+						return int(word)
 		except Exception as e:
 			self.log_message('error', f'Error analyzing chat: {str(e)[:100]}')
-
+		
 	def analyze_night_chat(self, self_number, couples):
 		try:
-			chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div[2]/div/div[1]/div/div/div').first
+			chat = None
+
+			for n in range(2, 6):
+				try:
+					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div[2]/div/div[1]/div/div/div').first
+					candidate.wait_for(state='visible', timeout=1000)
+					
+					chat = candidate
+
+					break
+				except PlaywrightTimeoutError:
+					continue
+
+			if not chat:
+				return
 
 			messages = chat.evaluate('''
 				(chat) => {
@@ -4167,7 +4530,23 @@ class Booster:
 	def wait_for_voting_phase(self):
 		self.log_message('info', 'Waiting for voting phase...')
 		
-		phase_locator = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div[1]/div/div/div[1]/div[1]/div/div[2]/div[1]/div[1]/div/div/div[1]/div')
+		phase_locator = None
+
+		for n in range(2, 6):
+			try:
+				candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[1]/div/div/div[1]/div')
+				candidate.wait_for(state='visible', timeout=1000)
+
+				phase_locator = candidate
+
+				break
+			except PlaywrightTimeoutError:
+				continue
+
+		if not phase_locator:
+			self.log_message('warning', 'Phase locator not found')
+
+			return False
 
 		discussion_started = False
 		voting_started = False
@@ -4258,10 +4637,27 @@ class Booster:
 		self.log_message('info', f'Using {ability_name} on player {target_number}...')
 
 		try:
-			ability_icon = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[2]/div/div/div[1]/div/div/div[1]/img')
+			ability_icon = None
+
+			for n in range(2, 6):
+				try:
+					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[2]/div/div/div[1]/div/div/div[1]/img')
+					candidate.wait_for(state='visible', timeout=500)
+
+					ability_icon = candidate
+
+					break
+				except PlaywrightTimeoutError:
+					continue
+
+			if not ability_icon:
+				self.log_message('error', f'Ability icon not found')
+
+				return
+
 			ability_icon.click(timeout=5000)
 
-			time.sleep(1)
+			time.sleep(0.1)
 
 			target_player = next((p for p in players if p['number'] == target_number), None)
 			
@@ -4273,9 +4669,15 @@ class Booster:
 			self.log_message('error', f'Failed to use {ability_name}: {str(e)[:50]}')
 
 	def act_villager(self):
+		self.log_message('info', 'Finding players...')
+
 		players, couples, werewolf_couples, self_number, role = self.get_players_info_villager()
 
+		self.log_message('success', 'Players found!')
+
 		if role not in ['priest', 'vigilante', 'gunner']:
+			self.log_message('cyan', 'No action required')
+
 			return
 
 		if not self.wait_for_voting_phase():
@@ -4300,17 +4702,25 @@ class Booster:
 				if self.check_stop_flag():
 					return
 
+				game_ended = False
+
+				for n in range(2, 6):
+					try:
+						end_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div').get_by_text('Продолжить')
+
+						if end_button.is_visible(timeout=200):
+							self.log_message('warning', 'Game ended during chat analysis, exiting...')
+							
+							game_ended = True
+
+							break
+					except PlaywrightTimeoutError:
+						continue
+
+				if game_ended:
+					return
+
 				time.sleep(2)
-
-				try:
-					continue_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div').get_by_text('Продолжить')
-					
-					if continue_button.is_visible(timeout=1000):
-						self.log_message('info', 'Game ended during chat analysis')
-
-						return
-				except PlaywrightTimeoutError:
-					pass
 
 				potential_target = self.analyze_day_chat(self_number)
 				
@@ -4355,7 +4765,23 @@ class Booster:
 			self.tag_target(players, self_number, couples, werewolf_numbers, start_time)
 
 	def send_couples_message(self, couples):
-		textarea = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div[2]/div/div[2]/div/textarea')
+		textarea = None
+
+		for n in range(2, 6):
+			try:
+				candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div[2]/div/div[2]/div/textarea')
+				candidate.wait_for(state='visible', timeout=500)
+
+				textarea = candidate
+
+				break
+			except PlaywrightTimeoutError:
+				continue
+
+		if not textarea:
+			self.log_message('error', 'Chat textarea not found')
+
+			return
 
 		self.log_message('info', 'Sending message...')
 
@@ -4453,18 +4879,36 @@ class Booster:
 
 			return
 
-		if target in [couples] + [werewolf_numbers]:
+		if target in couples + werewolf_numbers:
 			return
 
 		self.log_message('success', 'Target found!')
 		self.log_message('info', 'Tagging player...')
 
 		try:
-			self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[2]/div/div/div[1]/div/div/div/img').click(timeout=10000)
+			tag_icon = None
+
+			for n in range(2, 6):
+				try:
+					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[2]/div/div/div[1]/div/div/div/img')
+					candidate.wait_for(state='visible', timeout=200)
+
+					tag_icon = candidate
+
+					break
+				except PlaywrightTimeoutError:
+					continue
+
+			if not tag_icon:
+				self.log_message('error', 'Tag icon not found')
+
+				return
+
+			tag_icon.click(timeout=5000)
 
 			time.sleep(1)
 
-			players[target - 1]['locator'].click(timeout=10000)
+			players[target - 1]['locator'].click(timeout=5000)
 
 			self.log_message('success', 'Player tagged!')
 		except Exception as e:
@@ -4472,14 +4916,91 @@ class Booster:
 
 	def send_end_message(self):
 		try:
-			textarea = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div[2]/div/div/div/div/div/div[1]/div[1]/div[2]/div[1]/div/div/div/div[3]/div[2]/div/div/textarea')
-			
+			textarea = None
+
+			for n in range(2, 6):
+				try:
+					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div[2]/div/div/div/div/div[1]/div[1]/div[2]/div[1]/div/div/div/div[3]/div[2]/div/div/textarea')
+					candidate.wait_for(state='visible', timeout=500)
+
+					textarea = candidate
+
+					break
+				except PlaywrightTimeoutError:
+					continue
+
+			if not textarea:
+				return
+
 			textarea.fill('GG :)')
 			textarea.press('Enter')
 
 			time.sleep(1)
 		except Exception as e:
 			self.log_message('error', f'Failed to send end message: {str(e)[:50]}')
+	
+	def leave_room(self):
+		self.log_message('info', 'Leaving room...')
+
+		try:
+			back_button = None
+
+			for n in range(2, 6):
+				try:
+					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div/div/div[1]/div[1]/div[1]/div[1]/div[1]/div/div').first
+
+					try:
+						candidate.wait_for(state='visible', timeout=500)
+						
+						back_button = candidate
+
+						break
+					except PlaywrightTimeoutError:
+						continue
+				except:
+					continue
+
+			if not back_button:
+				self.log_message('error', 'Back button not found')
+
+				return False
+
+			back_button.click(timeout=5000)
+
+			confirm_button = None
+
+			for n in range(4, 8):
+				try:
+					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[3]/div[2]/div/div').first
+
+					try:
+						btn_text = candidate.text_content(timeout=500)
+					except UnicodeDecodeError:
+						btn_text = ''
+
+					if btn_text is not None:
+						confirm_button = candidate
+
+						break
+				except PlaywrightTimeoutError:
+					continue
+
+			if not confirm_button:
+				self.log_message('error', 'Confirm button not found')
+
+				return False
+
+			confirm_button.click(timeout=5000)
+
+			time.sleep(1)
+
+			self.log_message('success', 'Left the room, returning to lobby...')
+
+			return True
+		except Exception as e:
+			self.log_message('error', f'Failed to leave room: {str(e)[:100]}')
+
+			return False
 
 	def check_stop_flag(self):
 		if hasattr(self, '_stop_event'):
@@ -4527,118 +5048,168 @@ class Booster:
 				if elapsed_time > 120:
 					self.log_message('warning', 'Game not starting for 2 minutes, leaving room...')
 					
-					try:
-						back_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div[1]/div[1]/div[1]/div/div').first
-						back_button.click(timeout=5000)
-						
-						time.sleep(1)
+					if self.leave_room():
+						if not self.auto_find_and_join():
+							return
 
-						confirm_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[3]/div[2]/div/div')
-						confirm_button.click(timeout=5000)
-						
-						time.sleep(1)
-						
-						self.log_message('success', 'Left the room, returning to lobby...')
-						
-						break
-					except Exception as e:
-						self.log_message('error', f'Failed to leave room: {str(e)[:100]}')
+						start = False
+						werewolf = False
+						wait_start_time = time.monotonic()
 
+						continue
+
+					else:
+						self.log_message('warning', 'Could not leave room, waiting more...')
+						
+						wait_start_time = time.monotonic()
+
+				already_started = False
+
+				try:
+					for n in range(4, 8):
+						try:
+							candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[2]/div/div/div').first
+
+							if candidate.is_visible(timeout=200):
+								try:
+									button_text = candidate.text_content(timeout=200)
+								except UnicodeDecodeError:
+									button_text = ''
+
+								if button_text == 'Окей':
+									self.log_message('warning', 'Game already started, returning to lobby...')
+									
+									candidate.click()
+
+									time.sleep(1)
+
+									already_started = True
+
+									break
+						except PlaywrightTimeoutError:
+							continue
+				except:
+					pass
+
+				if already_started:
+					if not self.auto_find_and_join():
 						return
 
-				try:
-					game_started_ok_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div').first
-					
-					if game_started_ok_button.is_visible(timeout=500):
-						try:
-							button_text = game_started_ok_button.text_content(timeout=500)
-						except UnicodeDecodeError:
-							button_text = ''
-						
-						if button_text == 'Окей' or button_text == '':
-							self.log_message('warning', 'Game already started, returning to lobby...')
-							
-							game_started_ok_button.click()
-							
-							time.sleep(1)
+					start = False
+					werewolf = False
+					wait_start_time = time.monotonic()
 
-							break
-				except PlaywrightTimeoutError:
+					continue
+				
+				try:
+					host_left_ok_button = None
+
+					for n in range(4, 8):
+						try:
+							candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[3]/div/div/div')
+
+							if candidate.is_visible(timeout=500):
+								try:
+									button_text = candidate.text_content(timeout=500)
+								except UnicodeDecodeError:
+									button_text = ''
+
+								if button_text == 'Окей':
+									host_left_ok_button = candidate
+
+									break
+						except PlaywrightTimeoutError:
+							continue
+
+					if host_left_ok_button:
+						self.log_message('warning', 'Host left the room, returning to lobby...')
+
+						host_left_ok_button.click()
+
+						time.sleep(1)
+
+						if not self.auto_find_and_join():
+							return
+
+						start = False
+						werewolf = False
+						wait_start_time = time.monotonic()
+
+						continue
+				except:
 					pass
 
 				try:
-					host_left_ok_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[3]/div/div/div')
-					
-					if host_left_ok_button.is_visible(timeout=500):
-						try:
-							button_text = host_left_ok_button.text_content(timeout=500)
-						except UnicodeDecodeError:
-							button_text = ''
-							
-						if button_text == 'Окей' or button_text == '':
-							self.log_message('warning', 'Host left the room, returning to lobby...')
-
-							host_left_ok_button.click()
-							
-							time.sleep(1)
-							
-							break
-				except PlaywrightTimeoutError:
+					self.page.evaluate('''
+						() => {
+							const overlays = document.querySelectorAll('[style*="z-index: 99999"]');
+							for (const overlay of overlays) overlay.remove();
+						}
+					''')
+				except:
 					pass
 
-				try:
-					night_chat = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div[1]/div[3]/div/div[1]')
+				night_chat_found = False
 
+				for n in range(2, 6):
 					try:
-						chat_text = night_chat.text_content(timeout=1000)
-					except UnicodeDecodeError:
-						chat_text = ''
+						night_chat = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div[1]/div[3]/div/div[1]')
+						night_chat.wait_for(state='visible', timeout=500)
 
-					if chat_text == 'Чат оборотней' or 'оборот' in chat_text.lower():
-						werewolf = True
+						try:
+							chat_text = night_chat.text_content(timeout=500)
+						except UnicodeDecodeError:
+							chat_text = ''
 
+						if chat_text == 'Чат оборотней':
+							werewolf = True
+
+						night_chat_found = True
+
+						break
+					except PlaywrightTimeoutError:
+						continue
+
+				if night_chat_found:
 					start = True
 
 					break
-				except PlaywrightTimeoutError:
-					try:
-						create_game_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div[1]/div[1]/div/div[3]/div/div/div/div/div[2]/div[2]/div[2]/div[1]/div/div/div')
 
+				try:
+					for n in range(2, 6):
 						try:
-							button_text = create_game_button.text_content(timeout=1000)
-						except UnicodeDecodeError:
-							button_text = ''
-							
-						if 'СОЗДАТЬ' in button_text:
-							try:
-								close_popup_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div')
-	
-								try:
-									close_text = close_popup_button.text_content(timeout=1000)
-								except UnicodeDecodeError:
-									close_text = ''
-									
-								if close_text == 'Окей' or close_text == '':
-									close_popup_button.click()
-							except PlaywrightTimeoutError:
-								pass
-
-							break
-					except PlaywrightTimeoutError:
-						try:
-							start_game_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div[1]/div[2]/div[4]/div[2]/div/div/div')
+							create_game_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div/div/div[1]/div[1]/div[2]/div[3]/div/div/div/div/div[2]/div[2]/div[2]/div[1]/div/div/div')
 
 							try:
-								button_text = start_game_button.text_content(timeout=1000)
+								button_text = create_game_button.text_content(timeout=200)
 							except UnicodeDecodeError:
 								button_text = ''
-								
-							if 'НАЧАТЬ' in button_text or 'START' in button_text.upper():
-								start_game_button.click()
+
+							if 'СОЗДАТЬ' in button_text:
+								try:
+									for m in range(4, 8):
+										try:
+											close_popup_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{m}]/div/div[2]/div[2]/div/div/div')
+
+											try:
+												close_text = close_popup_button.text_content(timeout=500)
+											except UnicodeDecodeError:
+												close_text = ''
+
+											if close_text == 'Окей' or close_text == '':
+												close_popup_button.click()
+
+												break
+										except PlaywrightTimeoutError:
+											continue
+								except:
+									pass
+
+								break
 						except PlaywrightTimeoutError:
-							pass
+							continue
 				except:
-					continue
+					pass
 
 			if self.check_stop_flag():
 				self.log_message('info', 'Booster stop requested')
@@ -4646,7 +5217,7 @@ class Booster:
 				return
 
 			if not start:
-				continue
+				return
 
 			if werewolf:
 				self.act_werewolf()
@@ -4661,70 +5232,118 @@ class Booster:
 
 			self.log_message('info', 'Waiting for game end...')
 
+			game_ended = False
+
 			while True:
 				if self.check_stop_flag():
 					self.log_message('info', 'Booster stop requested')
-					
+
 					return
 
-				try:
-					continue_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div/div/div/div/div/div/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div').get_by_text('Продолжить')
-					continue_button.click(timeout=30000)
+				for n in range(2, 6):
+					try:
+						end_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div').get_by_text('Продолжить')
 
-					time.sleep(1)
+						if end_button.is_visible(timeout=200):
+							end_button.click(timeout=5000)
 
-					self.log_message('success', 'End!')
+							time.sleep(1)
 
+							self.log_message('success', 'End!')
+
+							game_ended = True
+
+							break
+					except PlaywrightTimeoutError:
+						continue
+
+				if game_ended:
 					break
-				except PlaywrightTimeoutError:
-					continue
-
-			if self.check_stop_flag():
-				self.log_message('info', 'Booster stop requested')
-					
-				return
 
 			self.send_end_message()
 
 			self.log_message('info', 'Exiting...')
 
+			time.sleep(1)
+
 			try:
-				play_again_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div[2]/div/div/div/div/div/div[1]/div[1]/div[2]/div[2]/div[3]/div[5]/div[2]/div/div[2]').get_by_text('Играть снова')
-				play_again_button.click(timeout=30000)
+				play_again_button = None
+
+				for _ in range(5):
+					for n in range(2, 6):
+						try:
+							candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div[2]/div/div/div/div/div[1]/div[1]/div[2]/div[2]/div[3]/div[5]/div[2]/div/div[2]').get_by_text('Играть снова')
+
+							if candidate.is_visible(timeout=500):
+								play_again_button = candidate
+
+								break
+						except PlaywrightTimeoutError:
+							continue
+
+					if play_again_button:
+						break
+
+					time.sleep(2)
+
+				if not play_again_button:
+					raise PlaywrightTimeoutError('Play again button not found')
+
+				play_again_button.click()
 
 				time.sleep(1)
 
 				try:
-					host_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[3]/div[2]/div/div')
-		
-					try:
-						button_text = host_button.text_content(timeout=1000)
-					except UnicodeDecodeError:
-						button_text = ''
-						
-					if button_text == 'Окей' or button_text == '':
-						host_button.click()
-				except PlaywrightTimeoutError:
+					for n in range(4, 8):
+						try:
+							host_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[3]/div[2]/div/div')
+
+							try:
+								button_text = host_button.text_content(timeout=1000)
+							except UnicodeDecodeError:
+								button_text = ''
+
+							if button_text == 'Окей':
+								host_button.click()
+
+								break
+						except PlaywrightTimeoutError:
+							continue
+				except:
 					pass
+
+				already_started = False
 
 				try:
-					modal_ok_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div/div/div')
+					for n in range(4, 8):
+						try:
+							modal_ok_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[2]/div/div/div')
 
-					try:
-						button_text = modal_ok_button.text_content(timeout=3000)
-					except UnicodeDecodeError:
-						button_text = ''
-						
-					if button_text == 'Окей' or button_text == '':
-						self.log_message('warning', 'Game already started, closing...')
-						
-						modal_ok_button.click()
+							try:
+								button_text = modal_ok_button.text_content(timeout=3000)
+							except UnicodeDecodeError:
+								button_text = ''
 
-						time.sleep(1)
+							if button_text == 'Окей':
+								self.log_message('warning', 'Game already started, closing...')
 
-						continue
-				except PlaywrightTimeoutError:
+								modal_ok_button.click()
+
+								time.sleep(1)
+
+								already_started = True
+
+								break
+						except PlaywrightTimeoutError:
+							continue
+				except:
 					pass
+
+				time.sleep(0.1)
+
+				if already_started:
+					if not self.auto_find_and_join():
+						return
 
 				rejoined = True
 			except PlaywrightTimeoutError:
@@ -4734,9 +5353,22 @@ class Booster:
 				playsound(sound_path, block=False)
 
 				try:
-					home_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[2]/div/div/div/div/div/div[2]/div/div/div/div/div/div[1]/div[1]/div[2]/div[2]/div[3]/div[5]/div[1]/div/div')
-					home_button.click(timeout=3000)
-				except PlaywrightTimeoutError:
+					home_button = None
+
+					for n in range(2, 6):
+						try:
+							candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div[2]/div/div/div/div/div[1]/div[1]/div[2]/div[2]/div[3]/div[5]/div[1]/div/div')
+							candidate.wait_for(state='visible', timeout=3000)
+
+							home_button = candidate
+
+							break
+						except PlaywrightTimeoutError:
+							continue
+
+					if home_button:
+						home_button.click(timeout=3000)
+				except:
 					pass
 
 				return
@@ -4782,15 +5414,22 @@ class Booster:
 						self.log_message('info', 'Booster stop requested')
 
 						break
-						
+
 					try:
-						self.page.goto('https://wolvesville.com', wait_until='commit', timeout=120000)
+						self.page.goto('https://wolvesville.com', wait_until='domcontentloaded', timeout=120000)
+
+						try:
+							self.page.wait_for_load_state('networkidle', timeout=30000)
+						except PlaywrightTimeoutError:
+							pass
 
 						break
 					except PlaywrightTimeoutError:
-						self.log_message('error', 'Timeout error!')
+						self.log_message('error', 'Timeout error, retrying...')
 
 						continue
+
+				self.get_bearer()
 
 				if self.check_stop_flag():
 					self.log_message('info', 'Booster stopping - closing browser')
@@ -4813,15 +5452,21 @@ class Booster:
 						if self.check_stop_flag():
 							break
 
-						cancel_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div[2]/div[2]/div[1]/div')
-						
 						try:
-							if cancel_button.is_visible(timeout=5000):
-								self.log_message('warning', 'Found startup "Existing game" modal, closing...')
-								
-								cancel_button.click()
+							for n in range(3, 8):
+								try:
+									cancel_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[2]/div[1]/div')
 
-								time.sleep(1)
+									if cancel_button.is_visible(timeout=500):
+										self.log_message('warning', 'Found startup "Existing game" modal, closing...')
+
+										cancel_button.click()
+
+										time.sleep(1)
+
+										break
+								except:
+									continue
 						except:
 							pass
 
@@ -4875,33 +5520,38 @@ class Booster:
 					time.sleep(3)
 
 					try:
-						join_new_button = self.page.locator('xpath=/html/body/div[1]/div/div/div/div/div/div[4]/div/div/div[3]/div[3]/div/div')
-						
-						if join_new_button.is_visible(timeout=3000):
-							self.log_message('cyan', 'Found "Join New" prompt, clicking...')
+						for n in range(3, 8):
+							try:
+								join_new_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div[3]/div[3]/div/div')
 
-							join_new_button.click()
+								if join_new_button.is_visible(timeout=500):
+									self.log_message('cyan', 'Found "Join New" prompt, clicking...')
 
-							time.sleep(1)
+									join_new_button.click()
+
+									time.sleep(1)
+
+									break
+							except:
+								continue
 					except:
 						pass
 
 					self.log_message('success', 'Menu opened!')
-
+					self.ensure_english_language()
 					self.play()
 
 					if self.check_stop_flag():
 						break
 
-				self.log_message('info', 'Booster closing browser context')
-
 				self.context.close()
-				
 		except KeyboardInterrupt:
 			if self.context:
 				self.context.close()
 
 			return
+		except AttributeError:
+			pass
 		except Exception as e:
 			if self.context:
 				self.context.close()
@@ -4920,7 +5570,7 @@ class Stalker:
 		try:
 			self.API_KEYS = self.config['STALKER_API_KEYS'].split(',')
 		except KeyError:
-			input(f'{Style.BRIGHT}{Back.RED}API key(s) not found!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Stalker Error: API key(s) not found!{Back.RESET}')
 
 			self.is_valid = False
 
@@ -4929,7 +5579,7 @@ class Stalker:
 		self.CHROME_EXECUTABLE = find_chrome_executable()
 
 		if not self.CHROME_EXECUTABLE:
-			print(f'{Style.BRIGHT}{Back.RED}Tracker Error: Path to Chrome Executable is invalid!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Stalker Error: Path to Chrome Executable is invalid!{Back.RESET}')
 
 			self.is_valid = False
 
@@ -4942,18 +5592,20 @@ class Stalker:
 		try:
 			self.CHROME_VIEWPORT = self.config['CHROME_VIEWPORT'].split(',')
 		except KeyError:
-			input(f'{Style.BRIGHT}{Back.RED}Stalker Error: Browser Viewport not found!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Stalker Error: Browser Viewport not found!{Back.RESET}')
 
 			self.is_valid = False
 
 			return
 
 		if len(self.CHROME_VIEWPORT) != 2:
-			input(f'{Style.BRIGHT}{Back.RED}Stalker Error: Browser Viewport is invalid!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Stalker Error: Browser Viewport is invalid!{Back.RESET}')
 
 			self.is_valid = False
 
 			return
+
+		self.USER_AGENT = generate_random_user_agent(device_type='windows', browser_type='chrome')
 
 		self.TIMEZONE = self.get_system_timezone()
 
@@ -4969,8 +5621,6 @@ class Stalker:
 		self.BEARER_BASE_URL = 'https://core.api-wolvesville.com/'
 
 		self.BEARER_HEADERS = {}
-
-		self.USER_AGENT = generate_random_user_agent(device_type='windows', browser_type='chrome')
 
 		self.TARGETS = OrderedDict()
 		self.CLAN_CHANGES = {}
@@ -5060,19 +5710,34 @@ class Stalker:
 		}
 
 	def get_bearer(self):
-		self.BEARER_TOKEN = self.page.evaluate('() => JSON.parse(localStorage.getItem("authtokens"))["idToken"]')
-		self.CF_JWT = self.page.evaluate('() => localStorage.getItem("cloudflare-turnstile-jwt")')
+		tokens = self.page.evaluate('''
+			() => {
+				const authtokens = JSON.parse(localStorage.getItem("authtokens"));
+				const cfJwt = localStorage.getItem("cloudflare-turnstile-jwt");
 
+				return {
+					idToken: authtokens["idToken"],
+					refreshToken: authtokens["refreshToken"],
+					cfJwt
+				};
+			}
+		''')
+		
+		self.BEARER_TOKEN = tokens['idToken']
+		self.REFRESH_TOKEN = tokens['refreshToken']
+		self.CF_JWT = tokens['cfJwt']
+		
 		self.BEARER_HEADERS = {
 			'Authorization': f'Bearer {self.BEARER_TOKEN}',
-			'Cf-Jwt': f'{self.CF_JWT}',
+			'Cf-Jwt': self.CF_JWT,
 			'Ids': '1'
 		}
-
+		
 		if hasattr(self, 'auth_client'):
 			try:
 				self.auth_client.update_tokens(
 					bearer_token=self.BEARER_TOKEN,
+					refresh_token=self.REFRESH_TOKEN,
 					stalker_keys=self.API_KEYS
 				)
 			except:
@@ -6466,11 +7131,11 @@ class Spinner:
 					window = pygetwindow.getWindowsWithTitle(self.BLUESTACKS5_NAME)[0]
 					window.size = (540, 934)
 				except IndexError:
-					input(f'{Style.BRIGHT}{Back.RED}Name of BlueStacks 5 window is invalid!{Back.RESET}')
+					print(f'{Style.BRIGHT}{Back.RED}Name of BlueStacks 5 window is invalid!{Back.RESET}')
 
 					os.abort()
 
-				self.log_message('info', 'Waiting for the game to load...')
+				self.log_message('info', 'Waiting for game load...')
 
 				result = self.wait('profile.png', click=False, check_fail=True, check_count=12, stop_check_callback=self.check_stop_flag)
 				
@@ -6584,7 +7249,7 @@ def banner(module=None):
 	os.system('cls' if os.name == 'nt' else 'clear')
 
 	message = f'{Style.BRIGHT}{Fore.RED}{"=" * 60}{Fore.RESET}\n'
-	message += f'{Style.BRIGHT}{Fore.RED}Men{Fore.YELLOW}tal{Fore.WHITE}ist {Fore.CYAN}CLI{Fore.RESET}'
+	message += f'{Style.BRIGHT}{Fore.RED}Men{Fore.YELLOW}tal{Fore.WHITE}ist {Fore.CYAN}{_launch_mode.upper()}{Fore.RESET}'
 
 	if module:
 		message += f'{Fore.RED} | {module}'

@@ -33,7 +33,7 @@ body {
     color: var(--men-red);
     margin: 0;
     letter-spacing: 2px;
-    text-shadow: 0 0 20px rgba(255, 237, 78, 0.3);
+    text-shadow: 0 0 20px var(--blood-dried));
 }
 
 .back-button {
@@ -50,9 +50,9 @@ body {
 }
 
 .back-button:hover {
-    border-color: var(--spin-gold);
+    border-color: var(--tal-gold);
     background: rgba(255, 237, 78, 0.05);
-    color: var(--spin-gold);
+    color: var(--tal-gold);
     box-shadow: 0 0 15px rgba(255, 237, 78, 0.2);
 }
 
@@ -238,7 +238,6 @@ body {
     50% { opacity: 0.6; }
 }
 
-/* Visual Spinner Wheel */
 .spinner-visual {
     flex: 1;
     display: flex;

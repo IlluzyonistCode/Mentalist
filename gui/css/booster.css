@@ -33,7 +33,7 @@ body {
     color: var(--men-red);
     margin: 0;
     letter-spacing: 2px;
-    text-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+    text-shadow: 0 0 20px var(--blood-dried);
 }
 
 .back-button {
@@ -50,9 +50,9 @@ body {
 }
 
 .back-button:hover {
-    border-color: var(--boost-green);
+    border-color: var(--tal-gold);
     background: rgba(0, 255, 136, 0.05);
-    color: var(--boost-green);
+    color: var(--tal-gold);
     box-shadow: 0 0 15px rgba(0, 255, 136, 0.2);
 }
 

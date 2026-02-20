@@ -1,7 +1,9 @@
 import os
 import sys
 from colorama import Fore, Back, Style, init
-from mentalist import Tracker, Booster, Stalker, Spinner, check_updates_on_startup, banner
+from mentalist import Tracker, Booster, Stalker, Spinner, set_launch_mode, check_updates_on_startup, banner
+
+set_launch_mode('CLI')
 
 
 def main():

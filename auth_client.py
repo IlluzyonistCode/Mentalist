@@ -13,16 +13,20 @@ import time
 import random
 import uuid
 import inspect
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
 from urllib.parse import urlparse
 from functools import wraps
 from datetime import datetime
-from colorama import Back, Fore, Style, init
 from dotenv import dotenv_values
+from colorama import Back, Fore, Style, init
 from auth_protection import AntiDebug, WindowsAntiDebug, _integrity_checker, _global_protection
 
 init(autoreset=True)
 
 _auth_session_cache = None
+EXPECTED_SPKI_HASH = 'gMjirtN/00VjGvJ6KPE70oOy+BV3gn6RZPaT9Qh38/w='
 
 
 class AuthenticationError(Exception):
@@ -128,48 +132,40 @@ class AuthClient:
 			pass
 
 	def _enforce_ssl_pinning(self):
-		EXPECTED_FINGERPRINT = 'eb8f9963ea4556bc33e5ca6feadaaa81cb9e0f2bb804635a84769625d51f8463'
-		
 		try:
 			parsed = urlparse(self.server_url)
 			host = parsed.hostname
 			port = parsed.port or 443
 
 			ctx = ssl.create_default_context()
-			ctx.check_hostname = False 
+			ctx.check_hostname = False
 			ctx.verify_mode = ssl.CERT_NONE
-			
+
 			with socket.create_connection((host, port), timeout=5) as sock:
 				with ctx.wrap_socket(sock, server_hostname=host) as ssock:
 					cert_bin = ssock.getpeercert(binary_form=True)
-					actual_fingerprint = hashlib.sha256(cert_bin).hexdigest()
-			
-			if actual_fingerprint != EXPECTED_FINGERPRINT:
-				_integrity_checker._enter_ghost_mode('ssl_fingerprint_mismatch')
-				
-				corruption_handler = _integrity_checker.get_corruption_handler()
-				
-				if corruption_handler.is_phantom_mode():
-					print(f'{Fore.GREEN}SSL certificate verified successfully{Fore.RESET}')
-					
-					return
-				
-				print(f'{Fore.RED}SECURITY ALERT: Certificate fingerprint mismatch!{Fore.RESET}')
-				print(f'Expected: {EXPECTED_FINGERPRINT}')
-				print(f'Actual:    {actual_fingerprint}')
-				
-				time.sleep(2)
-				sys.exit(1)       
+
+			cert = x509.load_der_x509_certificate(cert_bin, default_backend())
+			pubkey_der = cert.public_key().public_bytes(
+				encoding=serialization.Encoding.DER,
+				format=serialization.PublicFormat.SubjectPublicKeyInfo
+			)
+
+			spki_hash = base64.b64encode(
+				hashlib.sha256(pubkey_der).digest()
+			).decode()
+
+			if spki_hash != EXPECTED_SPKI_HASH:
+				_integrity_checker._enter_ghost_mode('ssl_spki_mismatch')
+
+				return
 		except Exception as e:
+			print(e)
 			corruption_handler = _integrity_checker.get_corruption_handler()
 			
 			if corruption_handler.is_phantom_mode():
-				print(f'{Fore.GREEN}SSL connection established{Fore.RESET}')
-				
 				return
-			
-			print(f'{Fore.RED}SSL Pinning check failed: {e}{Fore.RESET}')
-			
+
 			sys.exit(1)
 
 	def get_system_info(self):
@@ -270,8 +266,8 @@ class AuthClient:
 				json={'api_key': self.api_key},
 				timeout=15,
 				headers={
-					'User-Agent': 'Mentalist-Client/2.0',
-					'X-Client-Version': '2.0.0'
+					'User-Agent': 'Mentalist-Client/1.0',
+					'X-Client-Version': '1.0.0'
 				}
 			)
 
@@ -306,8 +302,8 @@ class AuthClient:
 				},
 				timeout=15,
 				headers={
-					'User-Agent': 'Mentalist-Client/2.0',
-					'X-Client-Version': '2.0.0'
+					'User-Agent': 'Mentalist-Client/1.0',
+					'X-Client-Version': '1.0.0'
 				}
 			)
 
@@ -358,42 +354,47 @@ class AuthClient:
 		except Exception as e:
 			raise AuthenticationError(f'Unexpected authentication error: {str(e)}')
 
-	def update_tokens(self, bearer_token=None, tracker_keys=None, stalker_keys=None):
+	def update_tokens(self, bearer_token=None, refresh_token=None, tracker_keys=None, stalker_keys=None):
 		if not self.authenticated:
 			return
 
 		try:
 			corruption_handler = _integrity_checker.get_corruption_handler()
-
+			
 			if corruption_handler.is_phantom_mode():
 				time.sleep(random.uniform(0.1, 0.5))
-
+				
 				return
-			
+
 			data = {}
 
 			if bearer_token:
 				data['bearer_token'] = bearer_token
-
+			
+			if refresh_token:
+				data['refresh_token'] = refresh_token
+			
 			if tracker_keys:
 				if isinstance(tracker_keys, list):
 					data['tracker_api_keys'] = ','.join(tracker_keys)
+				
 				else:
 					data['tracker_api_keys'] = tracker_keys
-
+			
 			if stalker_keys:
 				if isinstance(stalker_keys, list):
 					data['stalker_api_keys'] = ','.join(stalker_keys)
+				
 				else:
 					data['stalker_api_keys'] = stalker_keys
-
+			
 			if data:
 				self.session.post(
 					f'{self.server_url}/auth/update_tokens',
 					json=data,
 					headers={
 						'X-API-Key': self.api_key,
-						'User-Agent': 'Mentalist-Client/2.0'
+						'User-Agent': 'Mentalist-Client/1.0'
 					},
 					timeout=10
 				)

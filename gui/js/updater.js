@@ -1,3 +1,9 @@
+eel.expose(update_progress_handler, 'update_progress');
+
+function update_progress_handler(eventType, data) {
+    if (window.updater) window.updater.updateProgress(eventType, data);
+}
+
 class MentalistUpdater {
     constructor() {
         this.updateAvailable = false;
@@ -110,7 +116,7 @@ class MentalistUpdater {
         const modal = document.createElement('div');
         modal.className = 'update-modal';
         modal.innerHTML = `
-            <div class="modal-overlay" onclick="this.parentElement.remove()"></div>
+            <div class="modal-overlay"></div>
             <div class="modal-content update-modal-content">
                 <div class="modal-header">
                     <h2>Update Available</h2>
@@ -128,7 +134,7 @@ class MentalistUpdater {
                         </svg>
                         <div class="version-new">
                             <span class="label">New Version</span>
-                            <span class="value highlight">${this.updateInfo.version}</span>
+                            <span class="value highlight">${this.updateInfo.version} GUI</span>
                         </div>
                     </div>
 
@@ -352,10 +358,6 @@ class MentalistUpdater {
         console.error('Error:', message);
     }
 }
-
-window.update_progress = function(eventType, data) {
-    if (window.updater) window.updater.updateProgress(eventType, data);
-};
 
 window.notify_update_available = function(updateInfo) {
     if (window.updater) {

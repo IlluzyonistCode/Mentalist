@@ -28,13 +28,7 @@ class MentalistUpdater:
 		if getattr(sys, 'frozen', False):
 			return Path(sys.executable)
 
-		filename_map = {
-			'cli': 'Mentalist CLI.exe',
-			'gui': 'Mentalist GUI.exe',
-			'mobile': 'Mentalist Mobile.zip'
-		}
-
-		return Path(__file__).parent / filename_map.get(self.build_type, 'Mentalist CLI.exe')
+		return Path(__file__).parent / f'mentalist_{self.build_type}_v{self.current_version}.exe'
 
 	def _calculate_checksum(self, filepath):
 		sha256 = hashlib.sha256()
@@ -177,27 +171,33 @@ class MentalistUpdater:
 			return temp_path
 		except Exception as e:
 			print(f'{Style.BRIGHT}{Fore.RED}[UPDATER]{Fore.RESET} Download error: {str(e)}')
-   
-	def apply_update(self, update_file):
+	   
+	def apply_update(self, update_file, new_version):
 		try:
 			current_exe = self._get_exe_path()
 			backup_path = current_exe.with_suffix(current_exe.suffix + '.backup')
-
+			
 			print(f'\n{Style.BRIGHT}{Fore.CYAN}[UPDATER]{Fore.RESET} Applying {self.build_type.upper()} update...')
-
+			
 			if current_exe.exists():
 				print(f'{Fore.YELLOW}  Creating backup...')
 
 				shutil.copy2(current_exe, backup_path)
 
+			self.current_version = new_version
+			new_exe = self._get_exe_path()
+			
 			print(f'{Fore.YELLOW}  Installing new version...')
 
-			shutil.copy2(update_file, current_exe)
+			shutil.copy2(update_file, new_exe)
 			update_file.unlink()
 
+			if current_exe != new_exe and current_exe.exists():
+				current_exe.unlink()
+			
 			print(f'{Style.BRIGHT}{Fore.GREEN}[UPDATER]{Fore.RESET} Update applied successfully!')
 			print(f'{Fore.YELLOW}  Backup saved as: {backup_path.name}')
-
+			
 			return True
 		except Exception as e:
 			print(f'{Style.BRIGHT}{Fore.RED}[UPDATER]{Fore.RESET} Failed to apply update: {str(e)}')
@@ -246,7 +246,7 @@ class MentalistUpdater:
 		if not downloaded_file:
 			return False
 
-		success = self.apply_update(downloaded_file)
+		success = self.apply_update(downloaded_file, update_info.get('version'))
 
 		if success and auto_restart:
 			self.restart_application()
@@ -281,7 +281,7 @@ class MentalistUpdater:
 
 			return
 
-		success = self.apply_update(downloaded_file)
+		success = self.apply_update(downloaded_file, update_info.get('version'))
 
 		if not success:
 			input(f'\n{Fore.RED}Press Enter to continue...')
@@ -323,6 +323,8 @@ class EelUpdater(MentalistUpdater):
 			self.eel_available = True
 		except ImportError:
 			pass
+
+		self.build_type = 'gui'
 
 	def send_update(self, event_type, data):
 		if self.eel_available:
@@ -389,10 +391,11 @@ class EelUpdater(MentalistUpdater):
 				'error': str(e)
 			}
 
-	def apply_update_gui(self, update_file_path):
+	def apply_update_gui(self, update_file_path, update_info):
 		try:
 			self.send_update('install_started', {})
-			success = self.apply_update(Path(update_file_path))
+
+			success = self.apply_update(Path(update_file_path), update_info.get('version'))
 
 			if success:
 				self.send_update('install_complete', {})
