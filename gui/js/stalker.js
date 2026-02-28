@@ -97,8 +97,8 @@ function createTargetCard(target) {
                 <div class="target-number">${target.index || '?'}</div>
                 <div class="target-main-info">
                     <div class="target-name-row">
-                        <span class="target-name">${target.name || 'Unknown'}</span>
-                        <span class="target-level">★${target.level !== -1 ? target.level : '??'}</span>
+                        <span class="target-name">${target.name || 'N/A'}</span>
+                        <span class="target-level">★${target.level !== -1 ? target.level : '?'}</span>
                         <span class="status-dot ${statusClass}"></span>
                     </div>
                     <div class="target-id-sub">${target.id || 'N/A'}</div>
@@ -123,7 +123,7 @@ function createTargetCard(target) {
         <div class="target-compact-grid">
             <div class="mini-stat"><span>👤 Friends:</span> <strong>${target.friends_count || 0}</strong></div>
             <div class="mini-stat"><span>🌹 Roses:</span> <strong>${target.received_roses || 0} / ${target.sent_roses || 0}</strong></div>
-            <div class="mini-stat"><span>⌛ Created:</span> <strong>${target.created || '???'}</strong></div>
+            <div class="mini-stat"><span>⌛ Created:</span> <strong>${target.created || 'N/A'}</strong></div>
             <div class="mini-stat"><span>📅 Last:</span> <strong>${target.last_online || 'Never'}</strong></div>
 
             <div class="mini-stat" title="Village Wins/Losses"><span>🏠 Vill:</span> <strong class="green">${target.village_win_count || 0}</strong>/<strong class="red">${target.village_lose_count || 0}</strong></div>
@@ -134,9 +134,9 @@ function createTargetCard(target) {
 
         ${target.clan && target.clan.name ? `
         <div class="compact-clan">
-            <span class="clan-tag-mini">${target.clan.tag || 'CLAN'}</span>
+            <span class="clan-tag-mini">${target.clan.tag || ''}</span>
             <span class="clan-name-mini">${target.clan.name}</span>
-            <span class="clan-xp-mini">${target.clan.player_xp || '0xp'}</span>
+            <span class="clan-xp-mini">${target.clan.player_xp || ''}</span>
             <span class="clan-members-mini">👥${target.clan.member_count || '?'}/50</span>
         </div>
         ` : ''}
@@ -238,7 +238,7 @@ async function showTargetDetails(targetId) {
     const title = document.getElementById('targetModalTitle');
     const body = document.getElementById('targetModalBody');
 
-    title.textContent = target.name || 'Unknown';
+    title.textContent = target.name || 'N/A';
 
     const villageWinRate = calculateWR(target.village_win_count, target.village_lose_count);
     const wolfWinRate = calculateWR(target.werewolf_win_count, target.werewolf_lose_count);
@@ -249,21 +249,21 @@ async function showTargetDetails(targetId) {
             <div class="dossier-section">
                 <h4>IDENTITY</h4>
                 <p><strong>ID:</strong> ${target.id}</p>
-                <p><strong>Created:</strong> ${target.created || 'Unknown'}</p>
-                <p><strong>Bio:</strong> ${target.bio || 'No data'}</p>
+                <p><strong>Created:</strong> ${target.created || 'N/A'}</p>
+                <p><strong>Bio:</strong> ${target.bio || 'N/A'}</p>
             </div>
             
             <div class="dossier-grid">
                 <div class="dossier-box">
                     <h5>DYNAMICS</h5>
                     <p>WR: <span class="highlight">${calculateWR(target.win_count, target.lose_count)}%</span></p>
-                    <p>Games: ${(target.win_count || 0) + (target.lose_count || 0)}</p>
+                    <p>Games: ${(target.win_count || 0) + (target.lose_count || 0) + (target.tie_count || 0)}</p>
                     <p>Playtime: ${target.play_time || 'N/A'}</p>
                 </div>
                 <div class="dossier-box">
                     <h5>SOCIAL</h5>
                     <p>Friends: ${target.friends_count || 0}</p>
-                    <p>Roses Recv: ${target.received_roses || 0}</p>
+                    <p>Roses Received: ${target.received_roses || 0}</p>
                     <p>Roses Sent: ${target.sent_roses || 0}</p>
                 </div>
             </div>

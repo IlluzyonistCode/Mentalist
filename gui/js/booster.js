@@ -9,7 +9,7 @@ let boosterStats = {
 
 let currentState = {
     phase: 'Waiting for game...',
-    role: 'Unknown',
+    role: 'None',
     action: 'Idle'
 };
 
@@ -55,9 +55,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         if (latestState.action) updateState('action', latestState.action);
                     }
                     
-                    if (data.logs && data.logs.length > 0) {
-                        addLogsBatch(data.logs);
-                    }
+                    if (data.logs && data.logs.length > 0) addLogsBatch(data.logs);
                 } catch (e) {
                     console.error('[BOOSTER] Polling error:', e);
                 } finally {
@@ -113,6 +111,7 @@ function addLogsBatch(logs) {
         `;
         
         fragment.appendChild(entry);
+
         parseLogForState(log.message);
     });
     
@@ -140,15 +139,16 @@ function addLog(type, message) {
 function parseLogForState(message) {
     const msg = message.toLowerCase();
 
-    if (msg.includes('checking for cancel modal') || msg.includes('cancel modal detected')) {
-        updateState('phase', 'Modal window');
-        updateState('action', 'Closing cancel dialog');
-    } else if (msg.includes('cancel modal closed') || msg.includes('no cancel modal')) {
-        updateState('action', 'Cancel dialog handled');
-    } else if (msg.includes('checking for join new button') || msg.includes('join new button found')) {
-        updateState('action', 'Clicking join new');
-    } else if (msg.includes('join new clicked')) {
-        updateState('action', 'Join new executed');
+    if (msg.includes('premium custom games is active')) {
+        updateState('action', 'PCG active');
+    } else if (msg.includes('premium custom games not purchased')) {
+        updateState('action', 'No PCG');
+    } else if (msg.includes('creating custom room')) {
+        updateState('phase', 'Creating room');
+        updateState('action', 'Setting up');
+    } else if (msg.includes('game created')) {
+        updateState('phase', 'In lobby');
+        updateState('action', 'Waiting for players');
     } else if (msg.includes('scanning rooms')) {
         updateState('phase', 'Searching lobby');
         updateState('action', 'Scanning rooms');
@@ -164,9 +164,6 @@ function parseLogForState(message) {
     } else if (msg.includes('host left the room')) {
         updateState('phase', 'Lobby closed');
         updateState('action', 'Finding new room');
-    } else if (msg.includes('game already started')) {
-        updateState('phase', 'Room unavailable');
-        updateState('action', 'Retrying');
     } else if (msg.includes('you are a') || msg.includes('you are an')) {
         const roleMatch = msg.match(/you are (?:a|an) (.+?)!/i);
 
@@ -190,51 +187,23 @@ function parseLogForState(message) {
 
             updateStats();
         }
-    } else if (msg.includes('priest with werewolf couple')) {
-        updateState('action', 'Random shoot');
     } else if (msg.includes('finding players')) {
         updateState('action', 'Scanning players');
-    } else if (msg.includes('players found')) {
-        updateState('action', 'Players identified');
     } else if (msg.includes('sending message')) {
         updateState('action', 'Sending message');
-    } else if (msg.includes('message sent')) {
-        updateState('action', 'Message delivered');
     } else if (msg.includes('voting couple') || msg.includes('voting target')) {
         updateState('action', 'Voting');
-    } else if (msg.includes('couple voted') || msg.includes('voted')) {
-        updateState('action', 'Vote cast');
     } else if (msg.includes('finding target')) {
         updateState('action', 'Finding target');
     } else if (msg.includes('target found')) {
         updateState('action', 'Target locked');
-    } else if (msg.includes('target not found')) {
-        updateState('action', 'No target');
-    } else if (msg.includes('selecting bullet')) {
-        updateState('action', 'Loading bullet');
-    } else if (msg.includes('bullet selected')) {
-        updateState('action', 'Bullet ready');
-    } else if (msg.includes('using holy water') || msg.includes('using bullet') ||
-        msg.includes('using vigilante bullet')) {
-        updateState('action', 'Using ability');
-    } else if (msg.includes('holy water used') || msg.includes('bullet used') ||
-        msg.includes('vigilante bullet used')) {
-        updateState('action', 'Ability executed');
-    } else if (msg.includes('tagging player')) {
-        updateState('action', 'Tagging target');
-    } else if (msg.includes('player tagged')) {
-        updateState('action', 'Tag complete');
     } else if (msg.includes('analyzing day chat') || msg.includes('analyzing night chat')) {
         updateState('action', 'Analyzing chat');
-    } else if (msg.includes('no suspicious target')) {
-        updateState('action', 'No target');
     } else if (msg.includes('waiting for voting phase')) {
-        updateState('action', 'Waiting for voting phase');
+        updateState('action', 'Waiting for vote');
     } else if (msg.includes('voting phase started')) {
         updateState('phase', 'Voting phase');
         updateState('action', 'Ready to vote');
-    } else if (msg.includes('voting phase not detected')) {
-        updateState('action', 'Voting unavailable');
     } else if (msg.includes('waiting for game end')) {
         updateState('phase', 'Game ongoing');
         updateState('action', 'Waiting for end');
@@ -260,23 +229,29 @@ function updateState(key, value) {
 }
 
 function updateStateDisplay() {
-    document.getElementById('currentPhase').textContent = currentState.phase;
+    const phaseEl = document.getElementById('currentPhase');
+    phaseEl.textContent = currentState.phase;
+
+    if (currentState.phase === 'Creating room') phaseEl.style.color = '#00bcd4';
+    
+    else phaseEl.style.color = '';
 
     const roleEl = document.getElementById('currentRole');
+
     roleEl.textContent = currentState.role;
     roleEl.className = 'state-value';
 
     if (currentState.role.toLowerCase().includes('werewolf') ||
-        currentState.role.toLowerCase().includes('wolf')) {
+        currentState.role.toLowerCase().includes('wolf'))
         roleEl.classList.add('werewolf');
-    }
 
-    else if (currentState.role !== 'Unknown') roleEl.classList.add('villager');
+    else if (currentState.role !== 'None') roleEl.classList.add('villager');
 
     const actionEl = document.getElementById('currentAction');
     actionEl.textContent = currentState.action;
 
-    if (currentState.action !== 'Idle' && currentState.action !== 'Waiting') actionEl.classList.add('active');
+    if (currentState.action !== 'Idle' && currentState.action !== 'Waiting')
+        actionEl.classList.add('active');
     
     else actionEl.classList.remove('active');
 }

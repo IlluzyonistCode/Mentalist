@@ -49,15 +49,6 @@ class _KeyObfuscator:
 		except:
 			pass
 
-		try:
-			import __main__
-
-			if hasattr(__main__, '__file__'):
-				with open(__main__.__file__, 'rb') as f:
-					components.append(hashlib.sha256(f.read()[:4096]).hexdigest())
-		except:
-			pass
-		
 		fingerprint = ''.join(components).encode('utf-8')
 
 		return hashlib.sha512(fingerprint).digest()
@@ -213,6 +204,7 @@ def get_secure_store(file_type):
 		'cards': b'mentalist_cards_context_v1',
 		'icons': b'mentalist_icons_context_v1',
 		'role_profiles': b'mentalist_profiles_context_v1',
+		'hosts': b'mentalist_hosts_context_v1',
 		'targets': b'mentalist_targets_context_v1'
 	}
 	
@@ -220,6 +212,7 @@ def get_secure_store(file_type):
 		'cards': '.mentalist_data/cards.json',
 		'icons': '.mentalist_data/icons.json',
 		'role_profiles': '.mentalist_data/role_profiles.json',
+		'hosts': '.mentalist_data/hosts.json',
 		'targets': '.mentalist_data/targets.json'
 	}
 	

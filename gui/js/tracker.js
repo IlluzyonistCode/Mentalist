@@ -203,7 +203,7 @@ function createPlayerCard(player) {
         </div>
         <div class="player-role-info">
             <div class="${player.role ? 'player-role' : 'player-role-unknown'}">
-                ${player.role ? player.role : (claimHTML || '---')} ${protectionHTML}
+                ${player.role_name ? player.role_name : (claimHTML || '---')} ${protectionHTML}
             </div>
             <div class="status-badges">${teamHTML}${auraHTML}</div>
         </div>

@@ -3,10 +3,16 @@ from gevent import monkey
 monkey.patch_socket()
 monkey.patch_ssl()
 
+try:
+	import pyi_splash
+except ImportError:
+	pyi_splash = None
+
 import asyncio
 import eel
 import requests
 import threading
+import queue
 import os
 import sys
 import re
@@ -17,6 +23,7 @@ import tkinter as tk
 from colorama import Fore, Style, init
 from dotenv import dotenv_values
 from mentalist import Tracker, Stalker, Booster, Spinner, set_launch_mode
+from translations import is_game_phase
 from updater import EelUpdater
 
 set_launch_mode('GUI')
@@ -41,7 +48,7 @@ init(autoreset=True)
 
 eel.init('gui')
 
-VERSION = '1.0.2'
+VERSION = '1.0.3'
 updater_instance = None
 
 locks = {
@@ -73,17 +80,17 @@ stop_flags = {
 }
 
 pending_logs = {
-	'booster': [],
-	'spinner': [],
 	'tracker': [],
-	'stalker': []
+	'stalker': [],	
+	'booster': [],
+	'spinner': []
 }
 
 pending_states = {
-	'booster': [],
-	'spinner': [],
 	'tracker': [],
-	'stalker': []
+	'stalker': [],
+	'booster': [],
+	'spinner': []
 }
 
 logs_lock = threading.Lock()
@@ -98,8 +105,11 @@ class ModuleWrapper:
 		self.playwright_context = None
 		self.status = 'idle'
 		self.status_message = ''
+		self.end_requested = False
+		self.game_ended = False
+		self.command_queue = queue.Queue()
 
-		self.log_message = lambda msg_type, message: logging.info(f"{self.name} [{msg_type}]: {message}")
+		self.log_message = lambda msg_type, message: logging.info(f'{self.name} [{msg_type}]: {message}')
 
 		if hasattr(module_instance, 'log_message'):
 			self._inject_logging(module_instance, module_name)
@@ -155,7 +165,6 @@ class ModuleWrapper:
 					logging.warning(f'{self.name}: Context close error: {e}')
 
 				self.playwright_context = None
-			
 		except Exception as e:
 			logging.error(f'{self.name}: Browser cleanup error: {e}')
 	
@@ -261,10 +270,10 @@ def tracker_start():
 			def update_status(state, msg):
 				wrapper.status = state
 				wrapper.status_message = msg
-				wrapper.log_message('info', f"[{state.upper()}] {msg}")
+				wrapper.log_message('info', f'[{state.upper()}] {msg}')
 
 			try:
-				update_status('starting', 'Launching Browser...')
+				update_status('starting', 'Launching browser...')
 				
 				with sync_playwright() as playwright:
 					if tracker.check_stop_flag():
@@ -291,10 +300,47 @@ def tracker_start():
 					
 					update_status('starting', 'Navigating to Wolvesville...')
 
-					try:
-						tracker.page.goto('https://wolvesville.com', wait_until='commit', timeout=60000)
-					except Exception as e:
-						logging.warning(f'Navigation timeout (non-critical): {e}')
+					from undetected_playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+					while not tracker.check_stop_flag():
+						try:
+							tracker.page.goto('https://wolvesville.com', wait_until='domcontentloaded', timeout=120000)
+
+							try:
+								tracker.page.wait_for_load_state('networkidle', timeout=30000)
+							except PlaywrightTimeoutError:
+								pass
+
+							break
+						except PlaywrightTimeoutError:
+							update_status('starting', 'Timeout navigating to Wolvesville, retrying...')
+
+							continue
+						except Exception as e:
+							update_status('starting', f'Navigation error, retrying...')
+
+							time.sleep(3)
+
+							continue
+
+					if tracker.check_stop_flag():
+						return
+
+					update_status('starting', 'Website opened!')
+
+					changes = tracker.patch_localstorage()
+
+					if changes:
+						update_status('starting', f'Applied {changes} setting patches, reloading page...')
+
+						tracker.page.reload(wait_until='domcontentloaded', timeout=120000)
+
+						try:
+							tracker.page.wait_for_load_state('networkidle', timeout=30000)
+						except PlaywrightTimeoutError:
+							pass
+
+						update_status('starting', 'Page reloaded, continuing...')
 
 					while not tracker.check_stop_flag():
 						if not tracker.page or tracker.page.is_closed():
@@ -309,9 +355,7 @@ def tracker_start():
 
 						update_status('waiting_for_game', 'Waiting for game start...')
 
-						game_started = False
-						
-						while not tracker.check_stop_flag() and not game_started:
+						while not tracker.check_stop_flag():
 							if not tracker.page or tracker.page.is_closed():
 								break
 
@@ -332,24 +376,22 @@ def tracker_start():
 								if phase_locator:
 									phase_text = phase_locator.text_content(timeout=1000)
 
-									if phase_text.endswith('s') or \
-										phase_text.startswith('Обсуждение') or \
-										phase_text.startswith('Голосование'):
-
-										game_started = True
+									if is_game_phase(phase_text):
+										break
 							except:
 								pass
-							
-							if not game_started:
-								time.sleep(1)
-						
+
+							time.sleep(1)
+
+						time.sleep(1)
+
 						if tracker.check_stop_flag():
 							break
 
 						if not tracker.page or tracker.page.is_closed():
 							break
 
-						update_status('scanning', 'Game found! Getting token...')
+						update_status('scanning', 'Game found!')
 						
 						try:
 							tracker.get_bearer()
@@ -361,9 +403,21 @@ def tracker_start():
 							tracker.load_modal()
 							
 							update_status('scanning', 'Finding players...')
-							tracker.find_players()
+
+							wrapper.game_ended = False
+
+							players_grid_xpath = tracker.find_players_grid_xpath()
+
+							if players_grid_xpath is None:
+								logging.warning('Player grid not found, waiting for next game...')
+								update_status('waiting_for_game', 'Player grid not found. Waiting for next game...')
+								time.sleep(3)
+								continue
+
+							tracker.find_players(players_grid_xpath)
 							
 							update_status('scanning', 'Analyzing setup...')
+
 							roles = tracker.find_roles()
 							rotations = tracker.get_rotations()
 							tracker.ROTATION = tracker.choose_rotation(rotations, roles)
@@ -371,23 +425,50 @@ def tracker_start():
 							if tracker.ROTATION is None:
 								logging.warning('Rotation not found (Custom game?), continuing with partial data...')
 							
-							update_status('running', 'Tracking Active')
+							update_status('running', 'Tracker Active')
 
 							while not tracker.check_stop_flag():
 								if not tracker.page or tracker.page.is_closed():
 									break
+
+								if wrapper.end_requested:
+									wrapper.end_requested = False
+									wrapper.game_ended = True
+
+									# Reset tracker state for next game
+									tracker.PLAYERS = []
+									tracker.PLAYER_LAYERS = []
+									tracker.PLAYER_CARDS = {}
+									tracker.PLAYER_ICONS = {}
+									tracker.ROTATION = None
+									tracker.PLAYER_ALLIANCES = {}
+									tracker.PLAYER_CLAIMS = {}
+
+									update_status('waiting_for_game', 'Game ended. Waiting for next game...')
+
+									break
+
+								try:
+									while True:
+										cmd_fn = wrapper.command_queue.get_nowait()
+										cmd_fn()
+								except queue.Empty:
+									pass
 								
 								try:
 									tracker.update_players()
 								except Exception as e:
-									logging.debug(f'Update error: {e}')
+									logging.error(f'Tracker error: {e}')
+									logging.error(traceback.format_exc())
 
 								time.sleep(3)
 						except Exception as e:
-							logging.error(f'Game Loop Error: {e}')
+							logging.error(f'Tracker game loop error: {e}')
+							logging.error(traceback.format_exc())
+							
 							update_status('error', f'Game Error: {str(e)[:50]}')
 
-							time.sleep(3) 
+							time.sleep(3)
 			except Exception as e:
 				logging.error(f'Tracker Critical Thread Error: {e}')
 				logging.error(traceback.format_exc())
@@ -451,6 +532,9 @@ def tracker_get_state():
 
 				has_rotation = hasattr(tracker, 'ROTATION') and tracker.ROTATION
 				remaining = {'GOOD': [], 'EVIL': [], 'UNKNOWN': []}
+
+				if getattr(tracker_wrapper, 'game_ended', False):
+					has_rotation = False
 				
 				if has_rotation:
 					distinct_rotation = []
@@ -573,71 +657,88 @@ def tracker_send_command(command):
 	tracker = tracker_wrapper.module
 
 	try:
-		with locks['tracker']:
-			cmd = command.strip()
+		cmd = command.strip()
 
-			if cmd.lower() == 'end':
-				tracker.storm(hard=True)
+		if cmd.lower() == 'end':
+			tracker_wrapper.end_requested = True
+			tracker_wrapper.game_ended = True
+			tracker.PLAYERS = []
+			tracker.PLAYER_LAYERS = []
+			tracker.PLAYER_CARDS = {}
+			tracker.PLAYER_ICONS = {}
+			tracker.ROTATION = None
+			tracker.PLAYER_ALLIANCES = {}
+			tracker.PLAYER_CLAIMS = {}
+			return {'success': True}
 
-			elif cmd.lower().startswith('name of '):
-				parts = cmd.split(' is ', 1)
+		def execute_command():
+			try:
+				if cmd.lower() == 'end':
+					tracker_wrapper.end_requested = True
 
-				if len(parts) == 2:
-					p_part = parts[0].lower().replace('name of ', '').strip()
+				elif cmd.lower().startswith('name of '):
+					parts = cmd.split(' is ', 1)
+
+					if len(parts) == 2:
+						p_part = parts[0].lower().replace('name of ', '').strip()
+
+						if p_part.isdigit():
+							p_idx = int(p_part) - 1
+
+							tracker.set_name(p_idx, parts[1].strip())
+
+				elif cmd.lower().startswith('change '):
+					parts = cmd.lower().replace('change ', '').split(' to ')
+
+					if len(parts) == 2:
+						tracker.change_role(parts[0].strip(), parts[1].strip())
+
+				elif cmd.lower().startswith('remove '):
+					parts = cmd.lower().replace('remove ', '').split(' from ')
+
+					if len(parts) == 2:
+						role_name = parts[0].strip()
+						p_idx = int(parts[1].strip()) - 1
+
+						tracker.remove_role(p_idx, role_name)
+
+				elif cmd.lower().startswith('clear '):
+					p_part = cmd.lower().replace('clear ', '').strip()
 
 					if p_part.isdigit():
 						p_idx = int(p_part) - 1
 
-						tracker.set_name(p_idx, parts[1].strip())
+						tracker.PLAYERS[p_idx].update({
+							'role': None, 'team': None,
+							'teams_exclude': set(), 'equal': set(), 'not_equal': set(),
+							'aura': 'UNKNOWN', 'contradiction': None
+						})
 
-			elif cmd.lower().startswith('change '):
-				parts = cmd.lower().replace('change ', '').split(' to ')
+				elif ' is ' in cmd:
+					p, info = cmd.split(' is ', 1)
 
-				if len(parts) == 2:
-					tracker.change_role(parts[0].strip(), parts[1].strip())
+					tracker.set_player_info(p.strip(), info.strip())
 
-			elif cmd.lower().startswith('remove '):
-				parts = cmd.lower().replace('remove ', '').split(' from ')
+				elif '=' in cmd or '!=' in cmd:
+					is_equal = '!=' not in cmd
+					parts = cmd.split('!=' if not is_equal else '=')
+					indices = [int(p.strip()) - 1 for p in parts if p.strip().isdigit()]
+					
+					if len(indices) == 2:
+						tracker.set_equal(indices, is_equal)
 
-				if len(parts) == 2:
-					role_name = parts[0].strip()
-					p_idx = int(parts[1].strip()) - 1
+				elif cmd.lower() == 'storm':
+					tracker.storm()
 
-					tracker.remove_role(p_idx, role_name)
+				elif cmd.lower() == 'update':
+					tracker.update_players()
 
-			elif cmd.lower().startswith('clear '):
-				p_part = cmd.lower().replace('clear ', '').strip()
+				elif cmd.lower() == 'cursed turned':
+					tracker.set_cursed()
+			except Exception as e:
+				logging.error(f'Error executing queued command: {e}')
 
-				if p_part.isdigit():
-					p_idx = int(p_part) - 1
-
-					tracker.PLAYERS[p_idx].update({
-						'role': None, 'team': None,
-						'teams_exclude': set(), 'equal': set(), 'not_equal': set(),
-						'aura': 'UNKNOWN', 'contradiction': None
-					})
-
-			elif ' is ' in cmd:
-				p, info = cmd.split(' is ', 1)
-
-				tracker.set_player_info(p.strip(), info.strip())
-
-			elif '=' in cmd or '!=' in cmd:
-				is_equal = '!=' not in cmd
-				parts = cmd.split('!=' if not is_equal else '=')
-				indices = [int(p.strip()) - 1 for p in parts if p.strip().isdigit()]
-				
-				if len(indices) == 2:
-					tracker.set_equal(indices, is_equal)
-
-			elif cmd.lower() == 'storm':
-				tracker.storm()
-
-			elif cmd.lower() == 'update':
-				tracker.update_players()
-
-			elif cmd.lower() == 'cursed turned':
-				tracker.set_cursed()
+		tracker_wrapper.command_queue.put(execute_command)
 
 		return {'success': True}
 	except Exception as e:
@@ -814,6 +915,29 @@ def stalker_update_targets():
 	return {'success': True}
 
 @eel.expose
+def stalker_delete_target(target_id):
+	stalker_wrapper = active_modules.get('stalker')
+
+	if not stalker_wrapper:
+		return {'success': False, 'error': 'Stalker not initialized'}
+
+	stalker = stalker_wrapper.module
+
+	try:
+		with locks['stalker']:
+			if target_id not in stalker.TARGETS:
+				return {'success': False, 'error': 'Target not found'}
+
+			stalker.write_target(target_id)
+			stalker.save_targets()
+
+			return {'success': True}
+	except Exception as e:
+		logging.error(f'stalker_delete_target error: {e}')
+
+		return {'success': False, 'error': str(e)}
+
+@eel.expose
 def booster_start():
 	try:
 		with locks['booster']:
@@ -961,6 +1085,7 @@ def spinner_stop():
 				return {'success': False, 'error': 'Spinner is not running'}
 			
 			logging.info('Stopping Spinner...')
+
 			active_modules['spinner'].stop()
 			
 			if active_modules['spinner'].thread:
@@ -1137,7 +1262,6 @@ def main():
 	except Exception as e:
 		logging.error(f'Tkinter size detection failed: {e}')
 
-
 	if sys.platform == 'darwin':
 		sw += 100
 
@@ -1153,6 +1277,9 @@ def main():
 		'size': (sw // 2, sh),
 		'position': (sw // 2, 0)
 	}
+
+	if pyi_splash:
+		pyi_splash.close()
 
 	try:
 		eel.start('index.html', **eel_options)

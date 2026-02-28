@@ -30,8 +30,9 @@ import time
 import random
 import uuid
 import inspect
+import logging
 from undetected_playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from collections import OrderedDict
+from collections import OrderedDict, Counter
 from copy import deepcopy
 from itertools import combinations
 from functools import lru_cache
@@ -44,6 +45,18 @@ from pathlib import Path
 from auth_decorator import require_module_auth
 from auth_protection import _integrity_checker
 from data_protection import save_encrypted, load_encrypted
+from translations import (
+	match_event,
+	is_winner_event,
+	is_game_phase,
+	is_voting_phase,
+	is_discussion_phase,
+	is_ui,
+	match_ui,
+	ui_re,
+	parse_player_token,
+	extract_role_from_token
+)
 from updater import MentalistUpdater
 
 init(autoreset=True)
@@ -51,7 +64,7 @@ init(autoreset=True)
 requests.packages.urllib3.disable_warnings()
 
 _launch_mode = 'CLI'
-VERSION = '1.0.2'
+VERSION = '1.0.3'
 MACOS_DISABLE_PLAYWRIGHT_THREADING = (sys.platform == 'darwin')
 
 
@@ -59,6 +72,14 @@ def set_launch_mode(mode):
 	global _launch_mode
 
 	_launch_mode = mode
+
+def _pause(msg=''):
+	if _launch_mode == 'GUI':
+		if msg:
+			logging.warning(f'[MENTALIST] {msg}')
+
+	else:
+		input(msg)
 
 def find_chrome_executable():
 	if sys.platform == 'win32':
@@ -940,7 +961,19 @@ class Tracker:
 
 			return
 
-		self.CHROME_USER_DATA = USER_DATA_DIR / 'Mentalist'
+		try:
+			profile_number = int(self.config.get('CHROME_PROFILE', '1'))
+
+			if profile_number < 1 or profile_number > 10:
+				raise ValueError
+		except (ValueError, TypeError):
+			print(f'{Style.BRIGHT}{Back.RED}Tracker Error: Chrome Profile must be a number between 1 and 10!{Back.RESET}')
+			
+			self.is_valid = False
+
+			return
+
+		self.CHROME_USER_DATA = USER_DATA_DIR / f'Mentalist_{profile_number}'
 
 		os.makedirs(self.CHROME_USER_DATA, exist_ok=True)
 
@@ -1083,8 +1116,6 @@ class Tracker:
 		self.BEARER_HEADERS = {}
 
 		self.page = None
-		self.day_chat = None
-		self.dead_chat = None
 		self.last_message_number = 0
 
 		self.mastermind = None
@@ -1177,6 +1208,62 @@ class Tracker:
 
 		print(f'{Style.BRIGHT}{color}{message}{Fore.RESET}')
 
+	def patch_localstorage(self):
+		changes = 0
+
+		try:
+			self.page.wait_for_function(
+				'() => localStorage.getItem("settings") !== null',
+				timeout=60000
+			)
+		except:
+			return 0
+
+		raw_settings = self.page.evaluate('() => localStorage.getItem("settings")')
+
+		try:
+			settings = json.loads(raw_settings)
+		except:
+			return 0
+
+		patches = {
+			'backgroundMusic': False,
+			'darkMode': True,
+			'showIntros': False,
+			'showRoleHints': False,
+			'showWerewolfRolesOnGameGrid': True,
+			'soundEffects': False
+		}
+
+		for key, value in patches.items():
+			if settings.get(key) != value:
+				settings[key] = value
+
+				changes += 1
+
+		if changes:
+			self.page.evaluate(f'() => localStorage.setItem("settings", JSON.stringify({json.dumps(settings)}))')
+
+		raw_intros = self.page.evaluate('() => localStorage.getItem("intros")')
+
+		if raw_intros:
+			try:
+				intros = json.loads(raw_intros)
+			except:
+				return changes
+
+			patched = {
+				k: (False if v is True else (0 if v == 1 else v))
+				for k, v in intros.items()
+			}
+
+			if patched != intros:
+				self.page.evaluate(f'() => localStorage.setItem("intros", JSON.stringify({json.dumps(patched)}))')
+
+				changes += 1
+
+		return changes
+
 	def get_bearer(self):
 		tokens = self.page.evaluate('''
 			() => {
@@ -1213,7 +1300,7 @@ class Tracker:
 			'Cf-Jwt': self.CF_JWT,
 			'Ids': '1'
 		}
-		
+
 		if hasattr(self, 'auth_client'):
 			try:
 				self.auth_client.update_tokens(
@@ -1258,23 +1345,25 @@ class Tracker:
 			}
 			
 			if bidirectional:
-				endpoint = f'{self.SERVER_URL}/sync/{data_type}'
+				ENDPOINT = f'{self.SERVER_URL}/sync/{data_type}'
+
 				payload = {
 					'data': local_data,
 					'hash': current_hash
 				}
 				
 				response = requests.post(
-					endpoint,
+					ENDPOINT,
 					json=payload,
 					headers=headers,
 					timeout=self.SERVER_TIMEOUT
 				)
 
 			else:
-				endpoint = f'{self.SERVER_URL}/sync/{data_type}?hash={current_hash}'
+				ENDPOINT = f'{self.SERVER_URL}/sync/{data_type}?hash={current_hash}'
+
 				response = requests.get(
-					endpoint,
+					ENDPOINT,
 					headers=headers,
 					timeout=self.SERVER_TIMEOUT
 				)
@@ -1913,7 +2002,7 @@ class Tracker:
 
 	def revert(self, action):
 		if not self.PREV_PLAYERS:
-			input(f'\n{Style.BRIGHT}{Back.RED}Last revert reached!{Back.RESET}')
+			_pause(f'\n{Style.BRIGHT}{Back.RED}Last revert reached!{Back.RESET}')
 
 		else:
 			self.PLAYERS = deepcopy(self.PREV_PLAYERS[-1])
@@ -1927,12 +2016,12 @@ class Tracker:
 		data = self.get_player(name)
 
 		if data[0] == 404:
-			input(f'\n{Style.BRIGHT}{Back.RED}Invalid name!{Back.RESET}')
+			_pause(f'\n{Style.BRIGHT}{Back.RED}Invalid name!{Back.RESET}')
 
 			return 404
 
 		elif data[0]:
-			input(f'\n{Style.BRIGHT}{Back.RED}Error {data[0]}: {data[1]}{Back.RESET}')
+			_pause(f'\n{Style.BRIGHT}{Back.RED}Error {data[0]}: {data[1]}{Back.RESET}')
 
 			return data[0]
 
@@ -2067,7 +2156,7 @@ class Tracker:
 				break
 
 		else:
-			input(f'\n{Style.BRIGHT}{Back.RED}Incorrect destination role!{Back.RESET}')
+			_pause(f'\n{Style.BRIGHT}{Back.RED}Incorrect destination role!{Back.RESET}')
 
 			return
 
@@ -2081,7 +2170,7 @@ class Tracker:
 				break
 
 		else:
-			input(f'\n{Style.BRIGHT}{Back.RED}Incorrect source role!{Back.RESET}')
+			_pause(f'\n{Style.BRIGHT}{Back.RED}Incorrect source role!{Back.RESET}')
 
 			return
 
@@ -2176,7 +2265,7 @@ class Tracker:
 			player = int(player) - 1
 
 		else:
-			input(f'\n{Style.BRIGHT}{Back.RED}Incorrect number!{Back.RESET}')
+			_pause(f'\n{Style.BRIGHT}{Back.RED}Incorrect number!{Back.RESET}')
 
 			return
 
@@ -2200,7 +2289,7 @@ class Tracker:
 
 		else:
 			if self.set_role(player, info):
-				input(f'\n{Style.BRIGHT}{Back.RED}Incorrect info!{Back.RESET}')
+				_pause(f'\n{Style.BRIGHT}{Back.RED}Incorrect info!{Back.RESET}')
 
 	def choose_rotation(self, rotations, roles):
 		flatten_rotations = []
@@ -2301,7 +2390,8 @@ class Tracker:
 				if 'kill' in ability_type or 'ignite' in ability_type or 'lynch' in ability_type:
 					target = action.get('target')
 					
-					if not target: continue
+					if not target:
+						continue
 					
 					targets_to_process = [target] if isinstance(target, dict) else list(target)
 					
@@ -2333,107 +2423,479 @@ class Tracker:
 
 				self.THREAT_LEVELS[name] = int(min(100, max(1, normalized_threat)))
 
+	def build_role_lookup(self):
+		lookup = {}
+		acronym_map = {}
+
+		for role_id, role_data in self.ROLES.items():
+			name = role_data.get('name', '')
+
+			if not name:
+				continue
+
+			name_lower = name.lower()
+			id_lower = role_id.lower()
+			id_spaced = id_lower.replace('-', ' ')
+
+			for key in (name_lower, id_lower, id_spaced):
+				if key and key not in lookup:
+					lookup[key] = name
+
+			words = name_lower.replace('-', ' ').split()
+
+			if len(words) >= 2:
+				acronym = ''.join(w[0] for w in words if w)
+				acronym_map.setdefault(acronym, []).append(name)
+
+		for acronym, names in acronym_map.items():
+			unique = list(dict.fromkeys(names))
+
+			if len(unique) == 1 and acronym not in lookup:
+				lookup[acronym] = unique[0]
+
+		return lookup
+
+	def resolve_role_text(self, text, role_lookup):
+		text = text.lower().strip().rstrip('.,!? ')
+
+		if not text or len(text) < 2:
+			return
+
+		if text in role_lookup:
+			return role_lookup[text]
+
+		normed = text.replace(' ', '-')
+
+		if normed in role_lookup:
+			return role_lookup[normed]
+
+		if len(text) >= 3:
+			matches = []
+
+			for key, name in role_lookup.items():
+				if key.startswith(text):
+					matches.append(name)
+
+			unique_matches = list(dict.fromkeys(matches))
+
+			if len(unique_matches) == 1:
+				return unique_matches[0]
+
 	def parse_chat_messages(self, player_messages):
-		claim_patterns = {
-			'role_claim_self': re.compile(r"^(?:i am|im|iam|my role is) ([\w\-]+)"),
-			'player_is_role': re.compile(r"(\d{1,2}) is ([\w\-]+)"),
-			'seer_check': re.compile(r"^(?:seer on|check on) (\d{1,2}) is (good|evil|unknown)"),
-			'doctor_protection': re.compile(r"^(?:doc on|protecting) (\d{1,2})")
+		role_lookup = self.build_role_lookup()
+
+		rotation_counts = {}
+
+		for slot in self.ROTATION:
+			rid = slot.get('id') if isinstance(slot, dict) else slot
+
+			if rid:
+				rotation_counts[rid] = rotation_counts.get(rid, 0) + 1
+
+		unique_role_ids = {rid for rid, cnt in rotation_counts.items() if cnt == 1}
+
+		aura_map = {
+			'good': 'GOOD',
+			'evil': 'EVIL',
+			'bad': 'EVIL',
+			'unk': 'UNKNOWN',
+			'unknown': 'UNKNOWN'
 		}
-		
+
+		patterns = {
+			'self_claim': re.compile(
+				r"^(?:i'?m|i am|iam|my role is)\s+([\w][\w\s\-]{1,25}?)(?:\s*$|[,\.!?\s])"
+				r"|^([\w][\w\s\-]{1,20}?)\s+here\b"
+				r"|^([\w][\w\s\-]{1,20}?)\s+claim\b"
+			),
+			'player_role': re.compile(
+				r'\b(\d{1,2})\s+(?:is\s+|=\s*)?([\w][\w\-]{1,25}?)(?:\s*$|[,\.!?\s])'
+			),
+			'spirit_seer': re.compile(
+				r'\b(\d{1,2})\s*[&,]\s*(\d{1,2})\s+(?:is\s+|are\s+)?(red|blue)\b'
+			),
+			'aura_result': re.compile(
+				r'\b(\d{1,2})\s+(?:is\s+)?(good|evil|bad|unk\b|unknown)\b'
+			),
+			'doctor_on': re.compile(
+				r'(?:doc(?:tor)?\s+on|protecting|heal(?:ing)?|sav(?:ed?|ing)|bg\s+(?:here\s+)?saved?)\s+(\d{1,2}|\bme\b)\b'
+			),
+			'jailer_on': re.compile(
+				r'(?:jail(?:ing|ed)?|warden\s+jail)\s+(\d{1,2})\b'
+			),
+			'vigilante_action': re.compile(
+				r'(?:vigi(?:lante)?\s+(?:open|shoot|kill)|shoot(?:ing)?\s+(\d{1,2})|\b(\d{1,2})\s+open\b)'
+			)
+		}
+
 		unique_claims = {}
 
 		self.PLAYER_ALLIANCES = {}
 
 		for p in self.PLAYERS:
-			if 'contradiction' in p:
-				del p['contradiction']
+			for key in ('contradiction',):
+				if key in p:
+					del p[key]
+
+		def get_claims(name):
+			if name not in self.PLAYER_CLAIMS:
+				self.PLAYER_CLAIMS[name] = {}
+
+			return self.PLAYER_CLAIMS[name]
+
+		def resolve_role(text):
+			return self.resolve_role_text(text, role_lookup)
+
+		def record_aura(target_num, aura_str, claimer_name):
+			aura = aura_map.get(aura_str.lower().rstrip('.'), 'UNKNOWN')
+
+			if 0 <= target_num < 16 and self.PLAYERS[target_num]['name']:
+				get_claims(claimer_name).setdefault('aura_claims', {})[target_num + 1] = aura
 
 		for msg_text in player_messages:
 			try:
-				player_num_str, message = msg_text.split(': ', 1)
-				player_name = player_num_str.split(' ', 1)[1]
+				prefix, message = msg_text.split(': ', 1)
+				parts = prefix.split(' ', 1)
+				player_num = int(parts[0]) - 1
+				player_name = parts[1]
 			except (ValueError, IndexError):
 				continue
 
-			message_lower = message.lower()
-			
-			for claim_type, pattern in claim_patterns.items():
-				match = pattern.search(message_lower)
+			ml = message.lower().strip()
 
-				if not match:
+			m = patterns['spirit_seer'].search(ml)
+
+			if m:
+				result = 'KILLER' if m.group(3) == 'red' else 'INNOCENT'
+
+				for grp in (1, 2):
+					t = int(m.group(grp)) - 1
+
+					if 0 <= t < 16 and self.PLAYERS[t]['name']:
+						get_claims(player_name).setdefault('spirit_checks', {})[t + 1] = result
+				
+				continue
+
+			m = patterns['aura_result'].search(ml)
+
+			if m:
+				record_aura(int(m.group(1)) - 1, m.group(2), player_name)
+
+			m = patterns['self_claim'].search(ml)
+
+			if m:
+				role_text = m.group(1) or m.group(2) or m.group(3)
+
+				if role_text:
+					role_name = resolve_role(role_text.strip())
+
+					if role_name:
+						get_claims(player_name)['role'] = role_name
+
+			for m in patterns['player_role'].finditer(ml):
+				t = int(m.group(1)) - 1
+
+				role_text = m.group(2)
+
+				if role_text in aura_map:
 					continue
 
-				if claim_type == 'role_claim_self':
-					claimed_role = match.group(1)
+				role_name = resolve_role(role_text)
 
-					if player_name not in self.PLAYER_CLAIMS:
-						self.PLAYER_CLAIMS[player_name] = {}
+				if role_name and 0 <= t < 16 and self.PLAYERS[t]['name']:
+					claims = get_claims(self.PLAYERS[t]['name'])
+					claims['role'] = role_name
+					claims['claimed_by'] = player_name
 
-					self.PLAYER_CLAIMS[player_name]['role'] = claimed_role
+			m = patterns['doctor_on'].search(ml)
 
-				elif claim_type == 'player_is_role':
-					target_num, claimed_role = int(match.group(1)) - 1, match.group(2)
+			if m:
+				target_raw = m.group(1)
 
-					if 0 <= target_num < 16 and self.PLAYERS[target_num]['name']:
-						target_name = self.PLAYERS[target_num]['name']
+				if target_raw and target_raw != 'me':
+					t = int(target_raw) - 1
 
-						if target_name not in self.PLAYER_CLAIMS:
-							self.PLAYER_CLAIMS[target_name] = {}
+					if 0 <= t < 16 and self.PLAYERS[t]['name']:
+						target_name = self.PLAYERS[t]['name']
+						alliances = self.PLAYER_ALLIANCES.setdefault(player_name, {})
+						alliances[target_name] = alliances.get(target_name, 0) + 1
 
-						self.PLAYER_CLAIMS[target_name]['role'] = claimed_role
-						self.PLAYER_CLAIMS[target_name]['claimed_by'] = player_name
-				
-				elif claim_type == 'seer_check':
-					target_num, aura = int(match.group(1)) - 1, match.group(2).upper()
+				elif target_raw == 'me':
+					alliances = self.PLAYER_ALLIANCES.setdefault(player_name, {})
+					alliances[player_name] = alliances.get(player_name, 0) + 1
 
-					if 0 <= target_num < 16 and self.PLAYERS[target_num]['name']:
-						self.PLAYERS[target_num]['aura'] = aura
+			m = patterns['jailer_on'].search(ml)
 
-						if player_name not in self.PLAYER_CLAIMS:
-							self.PLAYER_CLAIMS[player_name] = {}
+			if m:
+				t = int(m.group(1)) - 1
 
-						if 'seer_checks' not in self.PLAYER_CLAIMS[player_name]:
-							self.PLAYER_CLAIMS[player_name]['seer_checks'] = {}
+				if 0 <= t < 16 and self.PLAYERS[t]['name']:
+					get_claims(player_name).setdefault('jailed', []).append(t + 1)
 
-						self.PLAYER_CLAIMS[player_name]['seer_checks'][target_num + 1] = aura
+			m = patterns['vigilante_action'].search(ml)
 
-				elif claim_type == 'doctor_protection':
-					target_num = int(match.group(1)) - 1
+			if m:
+				target = m.group(1) or m.group(2)
 
-					if 0 <= target_num < 16 and self.PLAYERS[target_num]['name']:
-						target_name = self.PLAYERS[target_num]['name']
+				if target:
+					t = int(target) - 1
 
-						if player_name not in self.PLAYER_ALLIANCES:
-							self.PLAYER_ALLIANCES[player_name] = {}
-
-						self.PLAYER_ALLIANCES[player_name][target_name] = self.PLAYER_ALLIANCES[player_name].get(target_name, 0) + 1
-
-		unique_role_ids = {
-			'seer', 'jailer', 'fool', 'arsonist', 'serial-killer', 'mayor', 'alpha-werewolf', 'aura-seer', 'detective'
-		}
+					if 0 <= t < 16 and self.PLAYERS[t]['name']:
+						get_claims(player_name).setdefault('shot_at', []).append(t + 1)
 
 		for player_name, claim_data in self.PLAYER_CLAIMS.items():
-			role = claim_data.get('role')
+			role_name = claim_data.get('role')
 
-			if role in unique_role_ids:
-				if role in unique_claims:
-					original_claimer_name = unique_claims[role]
+			if not role_name:
+				continue
 
-					for p in self.PLAYERS:
-						if p['name'] in [player_name, original_claimer_name]:
-							p['contradiction'] = role
+			role_id = None
 
-				else:
-					unique_claims[role] = player_name
+			for rid, rdata in self.ROLES.items():
+				if rdata['name'].lower() == role_name.lower():
+					role_id = rid
+
+					break
+
+			if not role_id or role_id not in unique_role_ids:
+				continue
+
+			if role_id in unique_claims:
+				original = unique_claims[role_id]
+
+				for p in self.PLAYERS:
+					if p['name'] in (player_name, original):
+						p['contradiction'] = role_name
+
+			else:
+				unique_claims[role_id] = player_name
+
+	def apply_service_event(self, event):
+		key = event['event']
+
+		if is_winner_event(key):
+			return 1
+
+		def _slot(token_key):
+			token = event.get(token_key)
+
+			if token is None:
+				return
+
+			num, name = parse_player_token(token)
+			role = extract_role_from_token(token)
+
+			return num, name, role
+
+		def _apply(token_key, dead, role_override=None):
+			info = _slot(token_key)
+
+			if info is None:
+				return
+
+			num, name, role_ann = info
+
+			if not (0 <= num < 16):
+				return
+
+			self.set_name(num, name)
+			self.PLAYERS[num]['dead'] = dead
+
+			role = role_override or role_ann
+
+			if role:
+				self.set_role(num, role)
+
+		def _kill(token_key, role_override=None):
+			_apply(token_key, dead=True, role_override=role_override)
+
+		def _revive(token_key, role_override=None):
+			_apply(token_key, dead=False, role_override=role_override)
+
+		def _register(token_key, role_override=None):
+			info = _slot(token_key)
+
+			if info is None:
+				return
+
+			num, name, role_ann = info
+
+			if not (0 <= num < 16):
+				return
+
+			self.set_name(num, name)
+
+			role = role_override or role_ann
+
+			if role:
+				self.set_role(num, role)
+
+		if key in {
+			'chat_werewolves_killed',
+			'chat_werewolves_killed_toxic',
+			'chat_werewolf_frenzy_kill',
+			'role_junior_werewolf_target_killed',
+			'role_split_wolf_killed',
+			'role_split_wolf_target_killed',
+			'role_stubborn_werewolf_died',
+
+			'chat_serial_killer_killed',
+			'chat_cannibal_ate',
+			'chat_corruptor_killed',
+			'chat_evil_detective_killed',
+			'chat_instigator_killed',
+			'role_arsonist_player_ignited',
+			'role_bomber_player_exploded',
+			'role_astronomer_meteor_shower',
+			'role_avenger_killed_player',
+			'role_witch_killed',
+			'role_shapeshifter_killed',
+			'role_tough_guy_died',
+			'role_beast_hunter_trap_killed',
+			'role_trapper_trap_killed',
+			'role_bandit_player_killed',
+			'role_siren_kill_drown',
+			'role_forger_chat_sword_killed',
+			'role_prayer_player_killed',
+			'role_headless_horseman_system_kill',
+			'role_party_wolf_player_killed',
+			'role_candy_wolf_system_kill',
+			'role_evil_santa_killed',
+			'role_pumpkin_dealer_killed',
+			'role_pumpkin_dealer_bullet_killed',
+			'role_yule_wolf_system_kill',
+
+			'chat_the_village_killed',
+			'chat_judge_has_rightfully_convicted',
+			'chat_jailer_killed_target',
+			'chat_warden_kill',
+			'chat_marksman_shot',
+			'weather_thunderstorm_killed_player',
+
+			'role_sect_leader_sacrifice_killed_member',
+			'role_sect_leader_sacrifice_killed_target',
+
+			'chat_ghost_lady_bound_killed',
+			'chat_evil_cupid_bound_killed',
+			'chat_evil_cupid_killed',
+			'chat_player_surrendered',
+			'role_cupid_surrender',
+			'role_instigator_surrender',
+			'role_sect_member_fled',
+			'role_siren_kill_suicide',
+			'role_zombie_killed_werewolf',
+			'role_zombie_killed_decay'
+		}:
+			_kill('p0')
+
+		elif key in {
+			'chat_gunner_shot',
+			'chat_vigilante_shot',
+			'chat_priest_use_holy_water_killed',
+			'chat_bully_killed'
+		}:
+			_register('p0')
+			_kill('p1')
+
+		elif key in {
+			'chat_marksman_backfire',
+			'chat_warden_backfire',
+			'chat_priest_use_holy_water_commit_suicide'
+		}:
+			_kill('p0')
+			_register('p1')
+
+		elif key == 'chat_warden_werewolves_killed':
+			_kill('p0')
+
+		elif key == 'chat_judge_has_wrongfully_convicted':
+			_kill('p0')
+			_register('p1')
+
+		elif key in {'role_harlot_visit_die', 'role_harlot_visit_target_die'}:
+			info = _slot('p0')
+
+			if info:
+				num, name, role_ann = info
+
+				if 0 <= num < 16:
+					self.set_name(num, name)
+
+					if not self.PLAYERS[num].get('role'):
+						self.set_role(num, role_ann or 'Red lady')
+
+					self.PLAYERS[num]['dead'] = True
+
+		elif key == 'chat_zombie_bitten_converted_zombie':
+			_register('p0')
+
+		elif key == 'hero_public_announcement_short':
+			info0 = _slot('p0')
+			info1 = _slot('p1')
+
+			if info0:
+				num0, name0, role0 = info0
+
+				if 0 <= num0 < 16:
+					self.set_name(num0, name0)
+
+					if role0:
+						self.set_role(num0, role0)
+
+			if info1:
+				num1, name1, role1 = info1
+
+				if 0 <= num1 < 16:
+					self.set_name(num1, name1)
+					self.PLAYERS[num1]['dead'] = False
+					self.PLAYERS[num1]['hero'] = True
+
+					if role1:
+						self.set_role(num1, role1)
+
+		elif key in {'role_medium_revived_player', 'role_ritualist_revived_player'}:
+			_revive('p0')
+
+		elif key in {
+			'chat_jelly_werewolf_protected',
+			'chat_player_not_killed',
+			'chat_vigilante_reveal',
+			'split_wolf_revealed',
+			'fortune_teller_card_used_chat_message',
+			'weather_rain_washes_off_disguise_chat_message'
+		}:
+			_register('p0')
+
+		elif key == 'role_mayor_reveal_msg':
+			_apply('p0', dead=False, role_override='Mayor')
+
+		elif key == 'role_preacher_reveal_msg':
+			_apply('p0', dead=False, role_override='Preacher')
 
 	def update_players(self):
-		updates = 0
-
 		service_messages = []
 		player_messages = []
 
-		for chat in (self.day_chat, self.dead_chat):
+		day_chat = None
+		dead_chat = None
+
+		for n in range(2, 6):
+			try:
+				candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div/div').first
+				candidate.wait_for(state='visible', timeout=1000)
+
+				day_chat = candidate.first
+
+				dead_chat = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div[1]/div').first
+
+				break
+			except PlaywrightTimeoutError:
+				continue
+
+		if not day_chat and not dead_chat:
+			return
+
+		for chat in (day_chat, dead_chat):
 			try:
 				if chat.is_hidden(timeout=1000):
 					break
@@ -2441,21 +2903,23 @@ class Tracker:
 				result = chat.evaluate('''
 					(chat, last_message_number) => {
 						let service_messages = [],
-						player_messages = [],
-						messages = chat.querySelectorAll("div [dir=auto]");
+							player_messages = [],
+							messages = chat.querySelectorAll("div [dir=auto]");
 
 						if (messages.length < last_message_number) return;
 
 						for (let m = last_message_number; m < messages.length; ++m) {
-							blocks = messages[m].querySelectorAll("div > span");
+							const blocks = messages[m].querySelectorAll("div > span");
 
-							if (!blocks.length || blocks.length >= 3) service_messages.push(messages[m].textContent);
+							if (!blocks.length || blocks.length >= 3)
+								service_messages.push(messages[m].textContent);
 
-							else player_messages.push(messages[m].textContent);
+							else
+								player_messages.push(messages[m].textContent);
 						}
 
 						last_message_number = messages.length;
-
+						
 						return [service_messages, player_messages, last_message_number];
 					}
 				''', self.last_message_number)
@@ -2467,305 +2931,67 @@ class Tracker:
 			except:
 				continue
 
-		if len(service_messages):
+		if service_messages:
 			if len(self.PREV_PLAYERS) == 3:
 				self.PREV_PLAYERS.pop(0)
 
 			self.PREV_PLAYERS.append(deepcopy(self.PLAYERS))
 
-		for service_message in service_messages:
-			player = None
-			number = None
-			name = None
-			role = None
-			dead = True
+		for raw in service_messages:
+			event = match_event(raw.strip())
 
-			if 'монстра' in service_message:
+			if event is None:
 				continue
 
-			if 'убил' in service_message:
-				if 'дождь' in service_message:
-					player = service_message.split(' дождь на ')[1].split(' и убил его.')[0]
+			result = self.apply_service_event(event)
 
-				elif 'воду' in service_message:
-					if 'себя' in service_message:
-						players = service_message.split(' кинул святую воду в ')
-
-						for p in range(2):
-							number = int(players[p].split(' ')[0]) - 1
-							name = players[p].split(' ')[1]	
-
-							if '/' in players[p]:
-								role = players[p].split(' / ')[1].split(')')[0]
-
-							else:
-								role = None
-
-							self.set_name(number, name)
-							self.PLAYERS[number]['dead'] = not p
-
-							if role:
-								self.set_role(number, role)
-
-					else:
-						players = service_message.split(' кинул святую воду и убил ')
-
-						for p in range(2):
-							number = int(players[p].split(' ')[0]) - 1
-							name = players[p].split(' ')[1]	
-
-							if '/' in players[p]:
-								role = players[p].split(' / ')[1].split(')')[0]
-
-							else:
-								role = None
-
-							self.set_name(number, name)
-							self.PLAYERS[number]['dead'] = p
-
-							if role:
-								self.set_role(number, role)
-
-					continue
-
-				elif 'выстрелить' in service_message:
-					players = service_message.split(', но убил')[0].split(' попытался выстрелить в ')
-
-					for p in range(2):
-						number = int(players[p].split(' ')[0]) - 1
-						name = players[p].split(' ')[1]	
-
-						if '/' in players[p]:
-							role = players[p].split(' / ')[1].split(')')[0]
-
-						else:
-							role = None
-
-						self.set_name(number, name)
-						self.PLAYERS[number]['dead'] = not p
-
-						if role:
-							self.set_role(number, role)
-
-					continue
-
-				elif 'камень' in service_message:
-					players = service_message.split(' и убил его')[0].split(' бросил камень в ')
-
-					for p in range(2):
-						number = int(players[p].split(' ')[0]) - 1
-						name = players[p].split(' ')[1]	
-
-						if '/' in players[p]:
-							role = players[p].split(' / ')[1].split(')')[0]
-
-						else:
-							role = None
-
-						self.set_name(number, name)
-						self.PLAYERS[number]['dead'] = p
-
-						if role:
-							self.set_role(number, role)
-
-					continue
-
-				else:
-					if 'прошлой ночью' in service_message:
-						service_message = service_message.replace('прошлой ночью', '')
-
-					if 'убили' in service_message:
-						sep = ' убили '
-
-					elif 'убила' in service_message:
-						sep = ' убила '
-
-					else:
-						sep = ' убил '
-
-					player = service_message.split(sep)[1]
-
-			elif 'сделал выстрел' in service_message:
-				player = service_message.split(' сделал выстрел в ')[1]
-
-			elif 'зарезал' in service_message:
-				player = service_message.split(' зарезал ')[1]
-
-			elif 'съел' in service_message:
-				player = service_message.split(' съел ')[1]
-
-			elif 'поджёг' in service_message:
-				player = service_message.split(' поджёг ')[1]
-
-			elif 'взрывом' in service_message:
-				player = service_message.split(' был убит взрывом!')[0]
-
-			elif 'застрелил' in service_message:
-				if 'Надзиратель' in service_message:
-					player = service_message.split(' застрелил ')[1]
-
-				else:
-					players = service_message.split(' застрелил ')
-
-					for p in range(2):
-						number = int(players[p].split(' ')[0]) - 1
-						name = players[p].split(' ')[1]	
-
-						if '/' in players[p]:
-							role = players[p].split(' / ')[1].split(')')[0]
-
-						else:
-							role = None
-
-						self.set_name(number, name)
-						self.PLAYERS[number]['dead'] = p
-
-						if role:
-							self.set_role(number, role)
-
-					continue
-
-			elif 'казнил' in service_message:
-				if 'Тюремщик' in service_message:
-					player = service_message.split(' ночью. ')[1].split(' умер.')[0]
-
-				else:
-					player = service_message.split(' казнил ')[1]
-
-			elif 'Меч' in service_message:
-				player = service_message.split(' чтобы убить ')[1]
-
-			elif 'посетил' in service_message and 'Ты' not in service_message:
-				player = service_message.split(' посетил ')[0]
-				role = 'Red lady'
-
-			elif 'был ранен' in service_message:
-				player = service_message.split(' был ')[0][6:]
-
-			elif 'раскрыть роль' in service_message:
-				player = service_message.split(' раскрыть роль ')[1]
-				dead = False
-
-			elif 'отомщена' in service_message:
-				player = service_message.split(' отомщена, ')[1].split(' погиб!')[0]
-
-			elif 'душе' in service_message:
-				player = service_message.split(' погиб ')[0]
-
-			elif 'привязан' in service_message:
-				player = service_message.split(' был убит ')[0]
-
-			elif 'связал' in service_message and 'Ты' not in service_message:
-				player = service_message.split('Роль ')[1].split(' была ')[0]
-
-			elif 'отравлен' in service_message:
-				player = service_message.split(' отравлен ')[0]
-
-			elif 'мэр!' in service_message:
-				player = service_message.split('Игрок ')[1].split(' - ')[0]
-
-				number, name = player.split(' ')
-				number = int(number) - 1
-				role = 'Mayor'
-				dead = False
-
-			elif 'проповедник!' in service_message:
-				player = service_message.split('Игрок ')[1].split(' - ')[0]
-
-				number, name = player.split(' ')
-				number = int(number) - 1
-				role = 'Preacher'
-				dead = False
-
-			elif 'воскресил' in service_message:
-				player = service_message.split(' воскресил ')[1].replace('.', '')
-
-				number, name = player.split(' ')
-				number = int(number) - 1
-				dead = False
-
-			elif 'использовал карту гадалки' in service_message:
-				player = service_message.split(' использовал карту гадалки')[0]
-
-			elif 'сбежал из деревни' in service_message:
-				if 'любви' in service_message:
-					player = service_message.split('Игрок ')[1].split(' лишился')[0]
-
-				elif 'рекрутом' in service_message:
-					player = service_message.split('Игрок ')[1].split(' был')[0]
-
-				else:
-					player = service_message.split(' сбежал из деревни.')[0]
-
-			elif 'героически' in service_message:
-				player = service_message.split(' героически занял место ')[0].split('Игрок ')[1]
-				number = int(player.split(' ')[0]) - 1
-				name = player.split(' ')[1]
-
-				self.PLAYERS[number]['dead'] = False
-				self.PLAYERS[number]['hero'] = True
-				self.set_name(number, name)
-
-				continue
-
-			elif 'победил' in service_message:
+			if result == 1:
 				return 1
 
-			if player:
-				player = player.replace('.', '').replace('!', '')
-
-				if not number:
-					number = int(player.split(' ')[0]) - 1
-					name = player.split(' ')[1]
-
-				if role is None and '/' in service_message:
-					role = player.split(' / ')[1].split(')')[0]
-
-				self.set_name(number, name)
-				self.PLAYERS[number]['dead'] = dead
-
-				if role:
-					self.set_role(number, role)
-
 		for player_message in player_messages:
-			if 'Приватное' in player_message or 'Личное' in player_message or 'Сбежавший' in player_message or 'Для ' in player_message:
+			parts = player_message.split(': ', 1)
+
+			if len(parts) != 2:
 				continue
 
-			player_message = player_message.split(': ', 1)
-
-			if len(player_message) != 2:
-				continue
-
-			player, message = player_message
+			player, message = parts
 
 			if ' ' not in player:
 				continue
 
-			number = int(player.split(' ')[0]) - 1
-			name = player.split(' ')[1]
+			try:
+				number = int(player.split(' ')[0]) - 1
+				name = player.split(' ')[1]
+			except (ValueError, IndexError):
+				continue
 
 			self.PLAYERS[number]['messages'].append(message)
 
 			for pp in range(len(self.PREV_PLAYERS)):
 				self.PREV_PLAYERS[pp][number]['messages'].append(message)
 
-			number = ''
+			mention_num = ''
 
-			for s in message:
-				if s.isdigit():
-					number += s
+			for ch in message:
+				if ch.isdigit():
+					mention_num += ch
 
-				elif number:
-					if int(number) in range(1, 17):
-						self.PLAYERS[int(number) - 1]['mentions'].append(message)
+				elif mention_num:
+					idx = int(mention_num)
+
+					if 1 <= idx <= 16:
+						self.PLAYERS[idx - 1]['mentions'].append(message)
 
 						for pp in range(len(self.PREV_PLAYERS)):
-							self.PREV_PLAYERS[pp][int(number) - 1]['mentions'].append(message)
+							self.PREV_PLAYERS[pp][idx - 1]['mentions'].append(message)
+					
+					mention_num = ''
 
-					number = ''
+		self.page.evaluate(
+			'(players) => localStorage.setItem("players", players)',
+			json.dumps(self.PLAYERS, default=list)
+		)
 
-		self.page.evaluate('(players) => localStorage.setItem("players", players)', json.dumps(self.PLAYERS, default=list))
-		
 		if self.mastermind:
 			self.mastermind.update_state()
 			self.calculate_threats()
@@ -3008,21 +3234,6 @@ class Tracker:
 				'mentions': []
 			})
 
-		self.day_chat = None
-		self.dead_chat = None
-
-		for n in range(2, 6):
-			try:
-				candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div/div')
-				candidate.wait_for(state='visible', timeout=1000)
-
-				self.day_chat = candidate.first
-				self.dead_chat = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div[1]/div')
-
-				break
-			except PlaywrightTimeoutError:
-				continue
-
 		self.mastermind = Mastermind(self)
 
 	def monitor(self):
@@ -3078,6 +3289,7 @@ class Tracker:
 			teams_exclude = player['teams_exclude']
 			aura = player['aura']
 			messages = player['messages']
+			mentions = player['mentions']
 
 			cards = list(self.PLAYER_CARDS.get(name, {}).values())
 			flatten_cards = []
@@ -3131,7 +3343,7 @@ class Tracker:
 			elif min_level != -1:
 				info += f' {Fore.YELLOW}⭐{min_level}+{Fore.RESET}'
 
-			info += f' ({len(messages)})'
+			info += f' ({len(messages)}) ({len(mentions)})'
 
 			player_claim = self.PLAYER_CLAIMS.get(name, {})
 
@@ -3293,8 +3505,6 @@ class Tracker:
 			print(f'{Back.YELLOW}{Fore.BLACK}Mastermind found 0 possible actions.{Back.RESET}')
 
 		input()
-
-		return
 
 	def predict(self, player_name):
 		if not self.mastermind or not self.mastermind.profiles:
@@ -3597,11 +3807,25 @@ class Tracker:
 
 				self.log_message('success', 'Website opened!')
 
+				changes = self.patch_localstorage()
+
+				if changes:
+					self.log_message('warning', f'Applied {changes} setting patches, reloading page...')
+
+					self.page.reload(wait_until='domcontentloaded', timeout=120000)
+
+					try:
+						self.page.wait_for_load_state('networkidle', timeout=30000)
+					except PlaywrightTimeoutError:
+						pass
+
+					self.log_message('success', 'Page reloaded, continuing...')
+
 				while True:
 					banner(self.__class__.__name__)
 
 					if self.prepare():
-						input(f'\n{Style.BRIGHT}{Back.RED}Invalid API key!{Back.RESET}')
+						_pause(f'\n{Style.BRIGHT}{Back.RED}Invalid API key!{Back.RESET}')
 
 						return
 
@@ -3629,10 +3853,7 @@ class Tracker:
 
 							phase_text = phase_locator.text_content(timeout=1000)
 
-							if phase_text.endswith('s') or \
-								phase_text.startswith('Обсуждение') or \
-								phase_text.startswith('Голосование'):
-
+							if is_game_phase(phase_text):
 								break
 						except PlaywrightTimeoutError:
 							pass
@@ -3659,7 +3880,7 @@ class Tracker:
 					self.ROTATION = self.choose_rotation(rotations, roles)
 
 					if self.ROTATION is None:
-						input(f'\n{Style.BRIGHT}{Back.RED}Rotation not found!{Back.RESET}')
+						_pause(f'\n{Style.BRIGHT}{Back.RED}Rotation not found!{Back.RESET}')
 
 						return
 
@@ -3680,7 +3901,7 @@ class Tracker:
 		except AttributeError:
 			pass
 		except Exception as e:
-			input(f'\n{Style.BRIGHT}{Back.RED}{str(e)}{Back.RESET}')
+			_pause(f'\n{Style.BRIGHT}{Back.RED}{str(e)}{Back.RESET}')
 
 			return
 
@@ -3721,19 +3942,30 @@ class Booster:
 	def __init__(self):
 		self.config = dotenv_values(CONFIG_PATH)
 		self.is_valid = True
-		self.should_stop = False
 
 		self.CHROME_EXECUTABLE = find_chrome_executable()
 
 		if not self.CHROME_EXECUTABLE:
-			print(f'{Style.BRIGHT}{Back.RED}Tracker Error: Path to Chrome Executable is invalid!{Back.RESET}')
+			print(f'{Style.BRIGHT}{Back.RED}Booster Error: Path to Chrome Executable is invalid!{Back.RESET}')
 
 			self.is_valid = False
 
 			return
 
-		self.CHROME_USER_DATA = USER_DATA_DIR / 'Mentalist'
+		try:
+			profile_number = int(self.config.get('CHROME_PROFILE', '1'))
 
+			if profile_number < 1 or profile_number > 10:
+				raise ValueError
+		except (ValueError, TypeError):
+			print(f'{Style.BRIGHT}{Back.RED}Booster Error: Chrome Profile must be a number between 1 and 10!{Back.RESET}')
+			
+			self.is_valid = False
+
+			return
+
+		self.CHROME_USER_DATA = USER_DATA_DIR / f'Mentalist_{profile_number}'
+		
 		os.makedirs(self.CHROME_USER_DATA, exist_ok=True)
 
 		try:
@@ -3754,14 +3986,150 @@ class Booster:
 
 		self.USER_AGENT = generate_random_user_agent(device_type='windows', browser_type='chrome')
 
+		self.TIMEZONE = self.get_system_timezone()
+
+		self.ntp = ntplib.NTPClient()
+		self.NTP_SERVER = 'time.google.com'
+
 		self.BEARER_TOKEN = None
 		self.CF_JWT = None
 
+		self.BEARER_BASE_URL = 'https://core.api-wolvesville.com/'
 		self.BEARER_HEADERS = {}
+
+		self.BLOCKED_HOSTS = {}
+		self.HOST_STREAK = {}
+		self.current_host = None
+
+		self.WW_ROLES = {
+			'werewolf', 'junior-werewolf', 'yule-wolf', 'candy-wolf', 'wolffluencer',
+			'nightmare-werewolf', 'swamp-wolf', 'voodoo-werewolf', 'wolf-trickster',
+			'storm-wolf', 'wolf-shaman', 'wolf-scribe', 'confusion-wolf', 'wolf-pacifist',
+			'guardian-wolf', 'jelly-wolf', 'shadow-wolf', 'werewolf-berserk', 'toxic-wolf',
+			'alpha-werewolf', 'ghost-wolf', 'stubborn-werewolf', 'wolf-summoner',
+			'wolf-seer', 'blind-werewolf', 'random-werewolf'
+		}
+
+		self.SOLO_ROLES = {
+			'serial-killer', 'headless-horseman', 'evil-detective', 'cannibal',
+			'arsonist', 'alchemist', 'bomber', 'corruptor', 'illusionist',
+			'sect-leader', 'siren', 'blight', 'shapeshifter',
+			'evil-santa', 'evil-cupid', 'random-killer'
+		}
+
+		self.RV_ROLES = {
+			'headhunter', 'fool', 'anarchist'
+		}
+
+		self.NOT_ALLOWED = {
+			'accomplice', 'bandit', 'cursed-human', 'cursed', 'easter-bunny', 'fortune-teller',
+			'grave-robber', 'harlot', 'kitten-wolf', 'lurker', 'party-wolf', 'prayer',
+			'president', 'pumpkin-king', 'red-lady', 'random-all', 'random-voting',
+			'santa', 'sorcerer', 'split-wolf', 'watchdog', 'werewolf-fan', 'zombie',
+			'assassin'
+		}
+
+		self.ROLE_MAX_COUNT = {
+			'villager':           3,
+			'aura-seer':          2,
+			'blind-werewolf':     2,
+			'detective':          2,
+			'flower-child':       2,
+			'gambler':            2,
+			'guardian-wolf':      2,
+			'jelly-wolf':         2,
+			'mortician':          2,
+			'nightmare-werewolf': 2,
+			'pacifist':           2,
+			'pumpkin-oracle':     2,
+			'shadow-wolf':        2,
+			'sheriff':            2,
+			'spirit-seer':        2,
+			'storm-wolf':         2,
+			'swamp-wolf':         2,
+			'toxic-wolf':         2,
+			'violinist':          2,
+			'voodoo-werewolf':    2,
+			'wolf-pacifist':      2,
+			'wolf-seer':          2
+		}
+
+		self.KILLING_ROLES = {
+			'astronomer', 'avenger', 'beast-hunter', 'bully', 'flagger', 'forger',
+			'gunner', 'jailer', 'judge', 'marksman', 'nutcracker', 'priest',
+			'pumpkin-dealer', 'trapper', 'vigilante', 'warden', 'witch'
+		}
+
+		self.PROTECTING_ROLES = {
+			'bodyguard', 'butcher', 'doctor', 'ghost-lady', 'night-watchman',
+			'seer-apprentice', 'snow-angel', 'tough-guy',
+			'witch', 'pumpkin-dealer', 'forger', 'astronomer'
+		}
+
+		self.INVESTIGATIVE_ROLES = {
+			'analyst', 'aura-seer', 'detective', 'gambler', 'mortician',
+			'pumpkin-oracle', 'seer', 'sheriff', 'spirit-seer', 'violinist'
+		}
+
+		self.KILLING_MAX = 2
+		self.PROTECTING_MAX = 2
+		self.INVESTIGATIVE_MAX = 2
+		self.WW_MIN = 4
+
+		self.ALL_VILLAGE_ROLES = {
+			'villager', 'doctor', 'butcher', 'night-watchman', 'bodyguard', 'tough-guy',
+			'seer-apprentice', 'seer', 'analyst', 'aura-seer', 'pumpkin-oracle',
+			'spirit-seer', 'gambler', 'violinist', 'sheriff', 'detective', 'mortician',
+			'ghost-lady', 'jailer', 'warden', 'vigilante', 'gunner', 'bully', 'witch',
+			'pumpkin-dealer', 'forger', 'astronomer', 'beast-hunter', 'trapper',
+			'flagger', 'priest', 'judge', 'marksman', 'nutcracker', 'snow-angel',
+			'flower-child', 'pacifist', 'mayor', 'resolutionist', 'baker',
+			'grumpy-grandma', 'preacher', 'loudmouth', 'bellringer', 'avenger',
+			'admirer', 'cupid', 'instigator', 'medium', 'ritualist', 'conjuror',
+			'soulbinder', 'ferryman', 'fortune-teller'
+		}
 
 		self.context = None
 		self.page = None
 		self.player_name = None
+
+		self.load_hosts()
+
+	@staticmethod
+	def get_system_timezone():
+		try:
+			sys_tz = get_localzone()
+
+			return pytz.timezone(str(sys_tz))
+		except:
+			_pause(f'\n{Style.BRIGHT}{Back.RED}Could not detect local timezone. Defaulting to UTC.')
+
+			return pytz.utc
+
+	def get_ntp_timestamp(self):
+		try:
+			data = self.ntp.request(self.NTP_SERVER, version=3)
+
+			return data.tx_time
+		except:
+			return
+
+	def load_hosts(self):
+		self.HOSTS = load_encrypted('hosts') or {}
+
+	def save_hosts(self):
+		save_encrypted('hosts', self.HOSTS)
+
+	def check_stop_flag(self):
+		if hasattr(self, '_stop_event'):
+			return self._stop_event.is_set()
+
+		try:
+			from mentalist_gui import stop_flags
+
+			return stop_flags.get('booster', threading.Event()).is_set()
+		except:
+			return False
 
 	def log_message(self, msg_type, message):
 		colors = {
@@ -3775,6 +4143,62 @@ class Booster:
 		color = colors.get(msg_type, Fore.WHITE)
 
 		print(f'{Style.BRIGHT}{color}{message}{Fore.RESET}')
+
+	def patch_localstorage(self):
+		changes = 0
+
+		try:
+			self.page.wait_for_function(
+				'() => localStorage.getItem("settings") !== null',
+				timeout=60000
+			)
+		except:
+			return 0
+
+		raw_settings = self.page.evaluate('() => localStorage.getItem("settings")')
+
+		try:
+			settings = json.loads(raw_settings)
+		except:
+			return 0
+
+		patches = {
+			'backgroundMusic': False,
+			'darkMode': True,
+			'showIntros': False,
+			'showRoleHints': False,
+			'showWerewolfRolesOnGameGrid': True,
+			'soundEffects': False
+		}
+
+		for key, value in patches.items():
+			if settings.get(key) != value:
+				settings[key] = value
+
+				changes += 1
+
+		if changes:
+			self.page.evaluate(f'() => localStorage.setItem("settings", JSON.stringify({json.dumps(settings)}))')
+
+		raw_intros = self.page.evaluate('() => localStorage.getItem("intros")')
+
+		if raw_intros:
+			try:
+				intros = json.loads(raw_intros)
+			except:
+				return changes
+
+			patched = {
+				k: (False if v is True else (0 if v == 1 else v))
+				for k, v in intros.items()
+			}
+
+			if patched != intros:
+				self.page.evaluate(f'() => localStorage.setItem("intros", JSON.stringify({json.dumps(patched)}))')
+
+				changes += 1
+
+		return changes
 
 	def get_bearer(self):
 		tokens = self.page.evaluate('''
@@ -3855,7 +4279,65 @@ class Booster:
 			except PlaywrightTimeoutError:
 				continue
 
-		self.log_message('warning', 'Language flag element not found, skipping check')
+		self.log_message('warning', 'Language flag element not found, skipping check...')
+
+	def is_host_blocked(self, host):
+		if not host or host not in self.HOSTS:
+			return False
+
+		entry = self.HOSTS[host]
+		blocked_until = entry.get('blocked_until')
+
+		if not blocked_until:
+			return False
+
+		now = self.get_ntp_timestamp()
+
+		if now is None:
+			self.log_message('warning', 'NTP unavailable, skipping block check...')
+
+			return False
+
+		if now < blocked_until:
+			remaining_days = (blocked_until - now) / 86400
+
+			self.log_message('warning', f'Host "{host}" is blocked for {remaining_days:.1f} more days, skipping...')
+			
+			return True
+
+		del self.HOSTS[host]
+
+		self.save_hosts()
+
+		self.log_message('info', f'Host "{host}" block expired, allowing...')
+
+		return False
+
+	def record_game_result(self, host, was_werewolf):
+		if not host:
+			return
+
+		if was_werewolf:
+			if host not in self.HOSTS:
+				self.HOSTS[host] = {'streak': 0}
+
+			self.HOSTS[host]['streak'] = self.HOSTS[host].get('streak', 0) + 1
+
+			streak = self.HOSTS[host]['streak']
+
+			if streak >= 5:
+				now = self.get_ntp_timestamp()
+
+				if now is not None:
+					self.HOSTS[host] = {'blocked_until': now + 7 * 86400}
+
+					self.log_message('error', f'Host "{host}" blocked for 7 days!')
+
+		else:
+			if host in self.HOSTS:
+				del self.HOSTS[host]
+
+		self.save_hosts()
 
 	def find_suitable_room(self):
 		if self.check_stop_flag():
@@ -3867,29 +4349,16 @@ class Booster:
 			rooms_container = None
 			active_xpath = None
 
-			all_candidates = self.page.locator('xpath=//div/div[2]/div[2]/div[1]/div/div/div/div').all()
-
-			for candidate in all_candidates:
+			for n in range(2, 8):
 				try:
-					count = candidate.evaluate('(el) => el.children.length;', timeout=500)
+					candidate = self.page.locator(f'xpath=//div/div/div/div/div/div/div[{n}]/div/div/div/div/div/div/div[1]/div[1]/div[2]/div[3]/div/div/div/div/div[2]/div[2]/div[1]/div/div/div/div').first
+
+					if not candidate.is_visible(timeout=500):
+						continue
+
+					count = candidate.evaluate('(el) => el.children.length', timeout=500)
 
 					if count < 1:
-						continue
-
-					first_child_text = candidate.evaluate('''
-						(el) => {
-							try {
-								return el.children[0].querySelector('div').textContent || '';
-							} catch(e) {
-								return '';
-							}
-						}
-					''', timeout=500)
-
-					if not first_child_text or len(first_child_text.strip()) < 3:
-						continue
-
-					if any(ui_text in first_child_text.upper() for ui_text in ['БЫСТРАЯ', 'СОЗДАТЬ', 'ИГРАТЬ', 'CUSTOM', 'QUICK', 'CREATE']):
 						continue
 
 					rooms_container = candidate
@@ -3934,9 +4403,10 @@ class Booster:
 					return None, None, False
 
 				try:
-					room_base = f'{active_xpath}/div[{i}]/div/div/div'
-					room_name_locator = self.page.locator(f'xpath={room_base}/div[2]')
-					room_name = room_name_locator.text_content(timeout=2000).lower()
+					room_base = f'{active_xpath}/div[{i}]/div/div/div[1]'
+
+					room_name_locator = self.page.locator(f'xpath={room_base}/div[2]/div[1]')
+					room_name = room_name_locator.text_content(timeout=500).lower()
 
 					if ('vill win' not in room_name \
 						and 'ᴠɪʟʟ ᴡɪɴ' not in room_name) \
@@ -3944,7 +4414,7 @@ class Booster:
 						continue
 
 					player_count_locator = self.page.locator(f'xpath={room_base}/div[5]')
-					player_count_text = player_count_locator.text_content(timeout=2000)
+					player_count_text = player_count_locator.text_content(timeout=500)
 
 					if not player_count_text.isdigit():
 						continue
@@ -3954,21 +4424,38 @@ class Booster:
 					if player_count > 6:
 						continue
 
-					xp_icon_locator = self.page.locator(f'xpath={room_base}/div[1]/img')
+					xp_icon_locator = self.page.locator(f'xpath={room_base}/div[3]/img')
 
-					if not xp_icon_locator.is_visible(timeout=2000):
+					if not xp_icon_locator.is_visible(timeout=500):
 						continue
+
+					try:
+						lock_locator = self.page.locator(f'{room_base}/div[2]/div[1]/div[1]/div[1]')
+						
+						try:
+							lock_text = lock_locator.text_content(timeout=500)
+						except UnicodeDecodeError:
+							continue
+					except:
+						pass 
 
 					self.log_message('success', f'Found suitable room: {room_name} ({player_count}/8)')
 
-					return i, active_xpath, False
-				except PlaywrightTimeoutError:
-					continue
+					host_locator = self.page.locator(f'xpath={room_base}/div[2]/div[2]')
+					host = host_locator.text_content(timeout=500).strip()
 
+					if self.is_host_blocked(host):
+						continue
+
+					self.current_host = host
+
+					return i, active_xpath, False
+				except PlaywrightTimeoutError as e:
+					continue
 		except Exception as e:
 			if 'strict mode violation' in str(e):
 				self.log_message('error', 'Multiple room containers detected, using first')
-			
+
 			else:
 				self.log_message('error', f'Error scanning rooms: {str(e)[:100]}')
 
@@ -3996,20 +4483,53 @@ class Booster:
 
 			room_locator.click(timeout=5000)
 
-			join_button = None
-
 			time.sleep(0.5)
+
+			for n in range(4, 8):
+				try:
+					cancel_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[3]/div[1]/div').first
+
+					if not cancel_button.is_visible(timeout=500):
+						continue
+
+					try:
+						button_text = cancel_button.text_content(timeout=500)
+					except UnicodeDecodeError:
+						button_text = ''
+
+					if is_ui(button_text, 'cancel') or button_text.strip() == '':
+						join_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[3]/div[2]/div/div').first
+
+						try:
+							button_text = join_button.text_content(timeout=500)
+						except:
+							button_text = ''
+
+						if is_ui(button_text, 'join'):
+							break
+
+						self.log_message('warning', 'Unexpected modal after clicking room (password?), cancelling...')
+
+						cancel_button.click()
+
+						time.sleep(1)
+
+						return False
+				except PlaywrightTimeoutError:
+					continue
+
+			join_button = None
 
 			for n in range(4, 8):
 				try:
 					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[3]/div[2]/div/div').first
 
 					try:
-						btn_text = candidate.text_content(timeout=500)
+						button_text = candidate.text_content(timeout=500)
 					except UnicodeDecodeError:
-						btn_text = ''
+						button_text = ''
 
-					if btn_text == 'Присоединиться':
+					if is_ui(button_text, 'join'):
 						join_button = candidate
 
 						break
@@ -4021,15 +4541,15 @@ class Booster:
 
 				for n in range(4, 8):
 					try:
-						cancel_btn = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[3]/div[1]/div').first
+						cancel_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[3]/div[1]/div').first
 
 						try:
-							btn_text = cancel_btn.text_content(timeout=500)
+							button_text = cancel_button.text_content(timeout=500)
 						except UnicodeDecodeError:
-							btn_text = ''
+							button_text = ''
 
-						if btn_text == 'Отмена' or btn_text == '':
-							cancel_btn.click()
+						if is_ui(button_text, 'cancel') or button_text == '':
+							cancel_button.click()
 
 							break
 					except PlaywrightTimeoutError:
@@ -4045,29 +4565,25 @@ class Booster:
 
 			try:
 				for n in range(4, 8):
-					for modal_xpath in [
-						f'/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[2]/div/div/div',
-						f'/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[3]/div[1]/div'
-					]:
-						try:
-							locator = self.page.locator(f'xpath={modal_xpath}').first
+					try:
+						locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[2]/div/div/div').first
 
-							if locator.is_visible(timeout=500):
-								try:
-									button_text = locator.text_content(timeout=500)
-								except UnicodeDecodeError:
-									button_text = ''
+						if locator.is_visible(timeout=500):
+							try:
+								button_text = locator.text_content(timeout=500)
+							except UnicodeDecodeError:
+								button_text = ''
 
-								if button_text == 'Окей':
-									self.log_message('warning', 'Game already started, retrying...')
+							if is_ui(button_text, 'ok'):
+								self.log_message('warning', 'Game already started, retrying...')
 
-									locator.click()
+								locator.click()
 
-									time.sleep(1)
+								time.sleep(1)
 
-									return False
-						except PlaywrightTimeoutError:
-							continue
+								return False
+					except PlaywrightTimeoutError:
+						continue
 			except:
 				pass
 
@@ -4090,7 +4606,7 @@ class Booster:
 
 			for n in range(2, 5):
 				try:
-					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div/div/div[1]/div[1]/div[2]/div[3]/div/div/div/div/div[2]/div[2]').get_by_text('ОБНОВИТЬ', exact=True).first
+					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div/div/div[1]/div[1]/div[2]/div[3]/div/div/div/div/div[2]/div[2]').get_by_text(ui_re('refresh')).first
 
 					if candidate.is_visible(timeout=1000):
 						refresh_button = candidate
@@ -4100,7 +4616,7 @@ class Booster:
 					continue
 
 			if not refresh_button:
-				refresh_button = self.page.get_by_text('ОБНОВИТЬ', exact=True).first
+				refresh_button = self.page.get_by_text(ui_re('refresh')).first
 
 			refresh_button.click(timeout=5000)
 
@@ -4603,14 +5119,14 @@ class Booster:
 
 				empty_text_counter = 0
 
-				if phase_text.startswith('Голосование'):
+				if is_voting_phase(phase_text):
 					self.log_message('success', 'Voting phase started!')
 
 					voting_started = True
 
 					break
 
-				if phase_text.startswith('Обсуждение'):
+				if is_discussion_phase(phase_text):
 					self.log_message('info', 'Discussion phase started')
 
 					discussion_started = True
@@ -4652,7 +5168,7 @@ class Booster:
 
 				empty_text_counter = 0
 
-				if phase_text.startswith('Голосование'):
+				if is_voting_phase(phase_text):
 					self.log_message('success', 'Voting phase started!')
 
 					return True
@@ -4666,6 +5182,13 @@ class Booster:
 	def use_ability_on_target(self, players, target_number, ability_name):
 		self.log_message('info', f'Using {ability_name} on player {target_number}...')
 
+		icon_src_map = {
+			'holy water': 'priest_holy_water',
+			'bullet': 'gunner_bullet'
+		}
+
+		expected_src = icon_src_map.get(ability_name)
+
 		try:
 			ability_icon = None
 
@@ -4674,6 +5197,14 @@ class Booster:
 					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[2]/div/div/div[1]/div/div/div[1]/img')
 					candidate.wait_for(state='visible', timeout=500)
 
+					if expected_src:
+						src = candidate.get_attribute('src', timeout=500) or ''
+
+						if expected_src not in src:
+							self.log_message('warning', f'Ability icon mismatch, skipping...')
+							
+							return
+
 					ability_icon = candidate
 
 					break
@@ -4681,7 +5212,7 @@ class Booster:
 					continue
 
 			if not ability_icon:
-				self.log_message('error', f'Ability icon not found')
+				self.log_message('error', 'Ability icon not found')
 
 				return
 
@@ -4690,10 +5221,10 @@ class Booster:
 			time.sleep(0.1)
 
 			target_player = next((p for p in players if p['number'] == target_number), None)
-			
+
 			if target_player:
 				target_player['locator'].click(timeout=5000)
-				
+
 				self.log_message('success', f'{ability_name.capitalize()} used on player {target_number}!')
 		except Exception as e:
 			self.log_message('error', f'Failed to use {ability_name}: {str(e)[:50]}')
@@ -4736,7 +5267,7 @@ class Booster:
 
 				for n in range(2, 6):
 					try:
-						end_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div').get_by_text('Продолжить')
+						end_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div').get_by_text(ui_re('continue')).first
 
 						if end_button.is_visible(timeout=200):
 							self.log_message('warning', 'Game ended during chat analysis, exiting...')
@@ -4815,7 +5346,7 @@ class Booster:
 
 		self.log_message('info', 'Sending message...')
 
-		templates = [
+		TEMPLATES = [
 			'Mine is {couples} 🔥 Show me yours daddy',
 			'{couples} gonna get it tonight 😈 wbu cutie?',
 			'Dibs on {couples} 💋 Your turn babe',
@@ -4870,7 +5401,7 @@ class Booster:
 
 		couples_text = ' & '.join([str(couple) for couple in couples]) if len(couples) > 1 else str(couples[0])
 		
-		message = random.choice(templates).format(couples=couples_text)
+		message = random.choice(TEMPLATES).format(couples=couples_text)
 
 		textarea.fill(message)
 		textarea.press('Enter')
@@ -5004,11 +5535,11 @@ class Booster:
 					candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[3]/div[2]/div/div').first
 
 					try:
-						btn_text = candidate.text_content(timeout=500)
+						button_text = candidate.text_content(timeout=500)
 					except UnicodeDecodeError:
-						btn_text = ''
+						button_text = ''
 
-					if btn_text is not None:
+					if button_text is not None:
 						confirm_button = candidate
 
 						break
@@ -5032,18 +5563,565 @@ class Booster:
 
 			return False
 
-	def check_stop_flag(self):
-		if hasattr(self, '_stop_event'):
-			return self._stop_event.is_set()
+	def get_role_max(self, role_id):
+		return self.ROLE_MAX_COUNT.get(role_id, 1)
+
+	def validate_combo(self, combo):
+		counts = Counter(combo)
+
+		for role in counts:
+			if role in self.NOT_ALLOWED:
+				return False
+
+		for role, cnt in counts.items():
+			if cnt > self.get_role_max(role):
+				return False
+
+		if sum(counts[r] for r in counts if r in self.WW_ROLES) < self.WW_MIN:
+			return False
+
+		if sum(counts[r] for r in counts if r in self.SOLO_ROLES) < 1:
+			return False
+
+		if sum(counts[r] for r in counts if r in self.RV_ROLES) < 1:
+			return False
+
+		if sum(counts[r] for r in counts if r in self.KILLING_ROLES) > self.KILLING_MAX:
+			return False
+
+		if sum(counts[r] for r in counts if r in self.PROTECTING_ROLES) > self.PROTECTING_MAX:
+			return False
+
+		if sum(counts[r] for r in counts if r in self.INVESTIGATIVE_ROLES) > self.INVESTIGATIVE_MAX:
+			return False
+
+		return True
+
+	def pick_fill_roles(self, base, n, offset=0):
+		counts = Counter(base)
+		killing_used = sum(counts[r] for r in counts if r in self.KILLING_ROLES)
+		protecting_used = sum(counts[r] for r in counts if r in self.PROTECTING_ROLES)
+		inv_used = sum(counts[r] for r in counts if r in self.INVESTIGATIVE_ROLES)
+
+		village_sorted = sorted(self.ALL_VILLAGE_ROLES)
+		neutral = [r for r in village_sorted
+						   if r not in self.KILLING_ROLES
+						   and r not in self.PROTECTING_ROLES
+						   and r not in self.INVESTIGATIVE_ROLES]
+		limited = [r for r in village_sorted if r not in neutral]
+
+		all_cands = neutral + limited
+		rotated = all_cands[offset:] + all_cands[:offset]
+
+		fill = []
+		fill_counts = Counter()
+
+		for role in rotated:
+			if len(fill) >= n:
+				break
+
+			total = counts.get(role, 0) + fill_counts.get(role, 0)
+
+			if total >= self.get_role_max(role):                                        continue
+			if role in self.KILLING_ROLES      and killing_used    >= self.KILLING_MAX:    continue
+			if role in self.PROTECTING_ROLES   and protecting_used >= self.PROTECTING_MAX: continue
+			if role in self.INVESTIGATIVE_ROLES and inv_used       >= self.INVESTIGATIVE_MAX: continue
+
+			fill.append(role)
+			fill_counts[role] += 1
+
+			if role in self.KILLING_ROLES:      killing_used += 1
+			if role in self.PROTECTING_ROLES:   protecting_used += 1
+			if role in self.INVESTIGATIVE_ROLES: inv_used += 1
+
+		while len(fill) < n:
+			if counts.get('villager', 0) + fill.count('villager') < self.get_role_max('villager'):
+				fill.append('villager')
+			else:
+				return None
+
+		return fill
+
+	def generate_xp_combos(self, target_sizes=(8, 10, 12, 16), max_per_size=750, seed=42):
+		random.seed(seed)
+
+		usable_ww = sorted(self.WW_ROLES   - self.NOT_ALLOWED)
+		usable_solo = sorted(self.SOLO_ROLES - self.NOT_ALLOWED)
+		usable_rv = sorted(self.RV_ROLES   - self.NOT_ALLOWED)
+
+		ww_combos = list(combinations(usable_ww, 4))
+		n_cands = len(self.ALL_VILLAGE_ROLES)
+		offsets = list(range(0, n_cands, max(1, n_cands // 12)))
+
+		results = []
+		seen = set()
+
+		for target_size in target_sizes:
+			fill_slots = target_size - 6
+			size_results = []
+
+			if fill_slots < 0:
+				continue
+
+			ww_shuffled = ww_combos[:]
+			random.shuffle(ww_shuffled)
+
+			for ww_4 in ww_shuffled:
+				if len(size_results) >= max_per_size: break
+				for solo in usable_solo:
+					if len(size_results) >= max_per_size: break
+					for rv in usable_rv:
+						if len(size_results) >= max_per_size: break
+						for offset in offsets:
+							base = list(ww_4) + [solo, rv]
+							fill = self.pick_fill_roles(base, fill_slots, offset=offset)
+
+							if fill is None: continue
+
+							combo = tuple(sorted(base + fill))
+
+							if combo in seen: continue
+
+							if self.validate_combo(list(combo)):
+								seen.add(combo)
+								size_results.append(list(combo))
+
+							if len(size_results) >= max_per_size: break
+
+			results.extend(size_results)
+
+		return results
+
+	def run_xp_validation(self, delay=1, limit=None, target_sizes=(8, 10, 12, 16), max_per_size=125):
+		self.log_message('info', 'Generating XP combos...')
+
+		combos = self.generate_xp_combos(target_sizes=target_sizes, max_per_size=max_per_size)
+
+		if limit:
+			combos = combos[:limit]
+
+		total = len(combos)
+		results = []
+
+		self.log_message('info', f'Validating {total} combos...')
+
+		for i, combo in enumerate(combos):
+			if self.check_stop_flag():
+				break
+
+			if i > 0:
+				time.sleep(delay)
+
+			role_ids_json = json.dumps(combo)
+
+			url = 'https://game.api-wolvesville.com/api/public/game/customGames/validateRoleSetupXp'
+
+			headers = json.dumps({
+				**self.BEARER_HEADERS,
+				'Content-Type': 'application/json',
+				'Origin': 'https://www.wolvesville.com',
+				'Referer': 'https://www.wolvesville.com/',
+				'Wwo-Client-Id': '0.1262659217576937'
+			})
+
+			payload = json.dumps({
+				'roles': combo,
+				'nightDurationInMs': 30000,
+				'dayDiscussionDurationInMs': 60000,
+				'dayVotingDurationInMs': 30000,
+				'randomRolesExcludedRoles': [],
+				'customRandomRoles': []
+			})
+
+			script = f'''
+				async () => {{
+					try {{
+						const response = await fetch("{url}", {{
+							method: "POST",
+							headers: {headers},
+							body: {payload}
+						}});
+
+						const text = await response.text();
+
+						return {{
+							status: response.status,
+							body: text ? JSON.parse(text) : null
+						}};
+					}} catch (e) {{
+						return {{
+							status: 0,
+							body: e.message
+						}};
+					}}
+				}}
+			'''
+
+			try:
+				result = self.page.evaluate(script)
+				status = result.get('status', 0)
+				parsed = result.get('body', None)
+
+				passed = (status == 200 and parsed == [])
+			except Exception as e:
+				status = 0
+				parsed = str(e)
+				passed = False
+
+			results.append({
+				'index': i,
+				'combo': combo,
+				'status': status,
+				'passed': passed,
+				'response': parsed
+			})
+
+			self.log_message(
+				'success' if passed else 'error',
+				f'[{i + 1}/{total}] {"✓" if passed else "✗"} HTTP {status} | {combo[:3]}...'
+			)
+
+		passed_n = sum(1 for r in results if r['passed'])
+
+		self.log_message(
+			'success' if passed_n == total else 'warning',
+			f'Done: {passed_n}/{total} passed'
+		)
+
+		return results
+
+	def generate_room_configs(self, count=5):
+		PHRASES = [
+			'This room has seen things you wouldn\'t believe. Stay anyway.',
+			'The last person who left early is still regretting it to this day.',
+			'Statistically speaking, you will survive. We choose not to elaborate.',
+			'No refunds on wasted evenings, but the XP is real.',
+			'Scientists confirm: leaving mid-game causes mild existential dread.',
+			'This lobby is haunted by the ghosts of disconnected players.',
+			'The seer checked. It\'s fine. Probably.',
+			'We run 24/7 because sleep is for the innocent.',
+			'Previous guests reported unexpected personal growth.',
+			'The village has trust issues. You\'ll fit right in.',
+			'Somewhere out there, a therapist is waiting for your game recap.',
+			'Last session ended peacefully. We don\'t talk about the one before.',
+			'Your future self will thank you for not leaving.',
+			'Fun fact: nobody who stayed regretted it. Sample size: disputed.',
+			'The chaos is part of the experience. We promise.',
+			'Certified grind zone. Decertification pending investigation.',
+			'Enter with low expectations. Leave with XP. Win-win.',
+			'The vibes are immaculate. Legally we can\'t say more.',
+			'Three players last week had a spiritual awakening. Coincidence.',
+			'The detective is always wrong here, and somehow that\'s comforting.',
+			'This room operates on pure spite and collective delusion.',
+			'You joined. That was the first smart decision you\'ve made today.',
+			'Plot twist incoming. There\'s always a plot twist.',
+			'The fool won last round and nobody is over it.',
+			'XP doesn\'t lie. People do. Come for the XP.',
+			'Every game here is a masterclass in trusting the wrong person.',
+			'Rumor has it someone once left at round 2. They are not missed.',
+			'The grind is real. The drama is realer. The XP is realest.',
+			'This is fine. Everything is fine. The wolves are fine.',
+			'We\'ve been running since before your sleep schedule fell apart.',
+			'Your mother would want you to get that XP.',
+			'Unconfirmed reports suggest fun is occasionally had here.',
+			'No judgment. Only voting. And occasionally judgment.',
+			'The game doesn\'t stop. Neither do we. Neither should you.',
+			'Brought to you by insomnia and a deep love of grinding.',
+			'Current mood: 16 players, zero trust, maximum XP.',
+			'This room is a social experiment that got out of hand.',
+			'Economists agree: leaving early is a net negative. Stay.',
+			'Abandon hope, all ye who disconnect.',
+			'The wolves are just misunderstood. The XP is not.',
+			'We do not gatekeep the grind. The grind gatekeeps itself.',
+			'Nothing builds character like being betrayed by player 7.',
+			'A wise man once said: never leave before the XP screen.',
+			'The lobby is always open. Your excuses are not welcome here.',
+			'Join. Stay. Grind. Repeat. Touch grass later.',
+			'Your ancestors did not survive this long for you to leave at round 3.',
+			'Leaving early will be reported to your local village council.',
+			'We have your IP. Stay.',
+			'The wolves know where you live. Finish the game.',
+			'Disconnecting triggers an automatic strongly worded letter.'
+		]
+
+		BASE_CONFIG = {
+			'language': 'en',
+			'gameServerBaseUrl': 'https://game.api-wolvesville.com',
+			'startGameDelayInMs': 15000,
+			'nightDurationInMs': 30000,
+			'dayDiscussionDurationInMs': 10000,
+			'dayVotingDurationInMs': 80000,
+			'randomRolesExcludedRoles': ['stubborn-werewolf', 'kitten-wolf'],
+			'friendsGameEveryoneCanInvite': True,
+			'privateGame': False,
+			'talismansEnabled': False,
+			'hideRoleOnDeath': False,
+			'hasPassword': False,
+			'password': '',
+			'minLevel': 0,
+			'voiceEnabled': False,
+			'regularXp': True,
+			'discussionSkipEnabled': False,
+			'votesHidden': False,
+			'preventAutostartIfLobbyIsFull': False,
+			'disableSpecSeeingDeathChat': False,
+			'roleCardsDisabled': False,
+			'disabledRoleCardAbilities': [],
+			'isRowWars': False,
+			'isGridWars': False,
+			'effectSepiaEnabled': False,
+			'allCoupled': True,
+			'unleashedElements': False,
+			'mandatoryVote': True,
+			'assassinsConvention': False,
+			'hotPotatoEnabled': False,
+			'is9PlayerGame': False,
+			'is25PlayerGame': False,
+			'honorEnabled': False,
+			'customRandomRoles': [],
+			'privateChatEnabled': False,
+			'dayPrivateChatEnabled': False,
+			'roseTradingEnabled': True,
+			'proximityChatEnabled': False,
+			'randomPhaseDuration': False,
+			'lastWillEnabled': False,
+			'draftingEnabled': False,
+			'anonymousPlayersEnabled': False
+		}
+
+		combos = self.generate_xp_combos(
+			target_sizes=(16,),
+			max_per_size=count,
+			seed=int(datetime.now(pytz.utc).timestamp()) % 100000
+		)
+
+		if len(combos) < count:
+			extra = self.generate_xp_combos(
+				target_sizes=(12,),
+				max_per_size=count - len(combos),
+				seed=int(datetime.now(pytz.utc).timestamp()) % 100000 + 1
+			)
+
+			combos.extend(extra)
+
+		combos = combos[:count]
+		configs = {}
+		phrases = random.sample(PHRASES, min(count, len(PHRASES)))
+
+		for i, combo in enumerate(combos, start=1):
+			phrase = phrases[i - 1]
+			description = f'Game #{i} 💘 | 24/7 until crash | Wait for 8 players ⏳ | No random kills/votes ❌ | {phrase}'
+
+			cfg = dict(BASE_CONFIG)
+			cfg['name'] = f'M | VILL WIN #{i} 💘'
+			cfg['roles'] = combo
+			cfg['pinnedMessage'] = description
+			cfg['hostedDate'] = datetime.now(pytz.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+
+			configs[f'combo_{i}'] = cfg
+
+		return configs
+
+	def patch_custom_games_config(self, configs):
+		current_history = self.page.evaluate('() => localStorage.getItem("custom-games-history")')
 
 		try:
-			from mentalist_gui import stop_flags
-
-			return stop_flags.get('booster', threading.Event()).is_set()
+			history = json.loads(current_history) if current_history else []
 		except:
-			return self.should_stop
+			history = []
 
-	def play(self):
+		if not isinstance(history, list):
+			history = []
+
+		history = [e for e in history if not e.get('name', '').startswith('M | ')]
+
+		for cfg in reversed(list(configs.values())):
+			history.insert(0, cfg)
+
+		self.page.evaluate(f'() => localStorage.setItem("custom-games-history", JSON.stringify({json.dumps(history)}))')
+
+		return len(configs)
+
+	def check_pcg_status(self):
+		try:
+			ENDPOINT = 'purchasableItems/customGamesPremiumPrice'
+
+			url = f'{self.BEARER_BASE_URL}{ENDPOINT}'
+			headers = json.dumps(self.BEARER_HEADERS)
+
+			response = self.page.evaluate(f'''
+				async () => {{
+					try {{
+						const response = await fetch("{url}", {{
+							method: "GET",
+							headers: {headers}
+						}});
+
+						const text = await response.text();
+
+						return {{
+							status: response.status,
+							body: text
+						}};
+					}} catch (e) {{
+						return {{
+							status: 500,
+							body: e.message
+						}};
+					}}
+				}}
+			''')
+
+			status = response.get('status')
+
+			if status == 204:
+				self.log_message('success', 'Premium Custom Games is active!')
+
+				return True
+
+			elif status == 200:
+				self.log_message('warning', f'Premium Custom Games not purchased')
+				
+				return False
+			
+			else:
+				self.log_message('error', f'Premium Custom Games check failed, assuming not purchased')
+				
+				return False
+		except Exception as e:
+			self.log_message('error', f'PCG check failed: {e}')
+
+			return False
+
+	def create_custom_room(self):
+		self.log_message('info', 'Generating XP room configs...')
+
+		configs = self.generate_room_configs(count=5)
+
+		self.patch_custom_games_config(configs)
+
+		config_key = random.choice(list(configs.keys()))
+		target_name = configs[config_key]['name']
+
+		self.log_message('info', f'Selected config: {target_name}')
+
+		for n in range(2, 6):
+			try:
+				create_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div/div/div[1]/div[1]/div[2]/div[3]/div/div/div/div/div[2]/div[2]/div[2]/div[1]/div/div/div')
+
+				try:
+					button_text = create_button.text_content(timeout=500)
+				except UnicodeDecodeError:
+					button_text = ''
+
+				if is_ui(button_text, 'create_game'):
+					create_button.click(timeout=5000)
+
+					time.sleep(0.1)
+
+					break
+			except PlaywrightTimeoutError:
+				continue
+		
+		else:
+			self.log_message('error', 'Create button not found')
+
+			return False
+		
+		history_button = None
+
+		for n in range(2, 6):
+			try:
+				candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div/div/div[2]/div/div/div/div/div/div[2]/div[1]/div/div[2]/div[2]/div/div/div')
+				candidate.wait_for(state='visible', timeout=500)
+
+				history_button = candidate
+
+				break
+			except PlaywrightTimeoutError:
+				continue
+
+		if not history_button:
+			self.log_message('error', 'History button not found')
+
+			return False
+
+		history_button.click(timeout=5000)
+		
+		time.sleep(0.1)
+
+		self.log_message('info', 'Searching for matching config...')
+
+		target_names = {cfg['name'] for cfg in configs.values()}
+
+		clicked = False
+
+		for n in range(4, 8):
+			for i in range(1, 20):
+				try:
+					name_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[2]/div/div/div[{i}]/div/div[1]/div[1]/div[1]')
+
+					try:
+						name_text = name_locator.text_content(timeout=300)
+					except UnicodeDecodeError:
+						name_text = ''
+
+					if not name_text:
+						break
+
+					if name_text.strip() == target_name:
+						self.log_message('success', f'Found config: {name_text.strip()}, clicking...')
+
+						card_locator = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div[2]/div/div/div[{i}]')
+						card_locator.click(timeout=5000)
+
+						clicked = True
+
+						time.sleep(0.1)
+
+						break
+				except PlaywrightTimeoutError:
+					break
+
+			if clicked:
+				break
+
+		if not clicked:
+			self.log_message('error', 'No matching config found in history')
+
+			return False
+
+		start_button = None
+
+		for n in range(2, 6):
+			try:
+				candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div[2]/div/div/div[2]/div/div/div/div/div/div[2]/div[2]/div[2]/div/div/div/div/div')
+				candidate.wait_for(state='visible', timeout=1000)
+
+				try:
+					button_text = candidate.text_content(timeout=500)
+				except UnicodeDecodeError:
+					button_text = ''
+
+				if is_ui(button_text, 'create_game'):
+					start_button = candidate
+
+					break
+			except PlaywrightTimeoutError:
+				continue
+
+		if not start_button:
+			self.log_message('error', 'Create game button not found or config is invalid')
+			
+			return False
+
+		start_button.click(timeout=5000)
+
+		self.log_message('success', 'Game created! Waiting for players...')
+
+		return True
+
+	def play(self, already_in_room=False):
 		rejoined = False
 
 		while True:
@@ -5054,7 +6132,10 @@ class Booster:
 
 				return
 
-			if not rejoined:
+			if already_in_room:
+				already_in_room = False
+
+			elif not rejoined:
 				if not self.auto_find_and_join():
 					return
 
@@ -5075,8 +6156,8 @@ class Booster:
 
 				elapsed_time = time.monotonic() - wait_start_time
 
-				if elapsed_time > 120:
-					self.log_message('warning', 'Game not starting for 2 minutes, leaving room...')
+				if elapsed_time > 300:
+					self.log_message('warning', 'Game not starting for 5 minutes, leaving room...')
 					
 					if self.leave_room():
 						if not self.auto_find_and_join():
@@ -5106,7 +6187,7 @@ class Booster:
 								except UnicodeDecodeError:
 									button_text = ''
 
-								if button_text == 'Окей':
+								if is_ui(button_text, 'ok'):
 									self.log_message('warning', 'Game already started, returning to lobby...')
 									
 									candidate.click()
@@ -5144,7 +6225,7 @@ class Booster:
 								except UnicodeDecodeError:
 									button_text = ''
 
-								if button_text == 'Окей':
+								if is_ui(button_text, 'ok'):
 									host_left_ok_button = candidate
 
 									break
@@ -5191,7 +6272,7 @@ class Booster:
 						except UnicodeDecodeError:
 							chat_text = ''
 
-						if chat_text == 'Чат оборотней':
+						if is_ui(chat_text, 'werewolf_chat'):
 							werewolf = True
 
 						night_chat_found = True
@@ -5208,6 +6289,27 @@ class Booster:
 				try:
 					for n in range(2, 6):
 						try:
+							host_create_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div/div/div[1]/div[1]/div[1]/div[2]/div[4]/div[2]/div/div/div')
+
+							try:
+								button_text = host_create_button.text_content(timeout=200)
+							except UnicodeDecodeError:
+								button_text = ''
+
+							if is_ui(button_text, 'start_game'):
+								host_create_button.click(timeout=5000)
+
+								self.log_message('success', 'Started game as host!')
+
+								break
+						except PlaywrightTimeoutError:
+							continue
+				except:
+					pass
+
+				try:
+					for n in range(2, 6):
+						try:
 							create_game_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div/div/div[1]/div[1]/div[2]/div[3]/div/div/div/div/div[2]/div[2]/div[2]/div[1]/div/div/div')
 
 							try:
@@ -5215,7 +6317,7 @@ class Booster:
 							except UnicodeDecodeError:
 								button_text = ''
 
-							if 'СОЗДАТЬ' in button_text:
+							if is_ui(button_text, 'create_game'):
 								try:
 									for m in range(4, 8):
 										try:
@@ -5226,7 +6328,7 @@ class Booster:
 											except UnicodeDecodeError:
 												close_text = ''
 
-											if close_text == 'Окей' or close_text == '':
+											if is_ui(close_text, 'ok') or close_text == '':
 												close_popup_button.click()
 
 												break
@@ -5248,6 +6350,9 @@ class Booster:
 
 			if not start:
 				return
+
+			self.record_game_result(self.current_host, werewolf)
+			self.current_host = None
 
 			if werewolf:
 				self.act_werewolf()
@@ -5272,7 +6377,7 @@ class Booster:
 
 				for n in range(2, 6):
 					try:
-						end_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div').get_by_text('Продолжить')
+						end_button = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[1]/div').get_by_text(ui_re('continue')).first
 
 						if end_button.is_visible(timeout=200):
 							end_button.click(timeout=5000)
@@ -5302,7 +6407,7 @@ class Booster:
 				for _ in range(5):
 					for n in range(2, 6):
 						try:
-							candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div[2]/div/div/div/div/div[1]/div[1]/div[2]/div[2]/div[3]/div[5]/div[2]/div/div[2]').get_by_text('Играть снова')
+							candidate = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div[2]/div/div/div/div/div[1]/div[1]/div[2]/div[2]/div[3]/div[5]/div[2]/div/div[2]').get_by_text(ui_re('play_again')).first
 
 							if candidate.is_visible(timeout=500):
 								play_again_button = candidate
@@ -5333,7 +6438,7 @@ class Booster:
 							except UnicodeDecodeError:
 								button_text = ''
 
-							if button_text == 'Окей':
+							if is_ui(button_text, 'ok'):
 								host_button.click()
 
 								break
@@ -5354,7 +6459,7 @@ class Booster:
 							except UnicodeDecodeError:
 								button_text = ''
 
-							if button_text == 'Окей':
+							if is_ui(button_text, 'ok'):
 								self.log_message('warning', 'Game already started, closing...')
 
 								modal_ok_button.click()
@@ -5431,7 +6536,8 @@ class Booster:
 					headless=False,
 					args=[
 						'--window-position=-7,40',
-						'--disable-blink-features=AutomationControlled'
+						'--disable-blink-features=AutomationControlled',
+						'--mute-audio'
 					],
 					ignore_default_args=['--enable-automation'],
 					chromium_sandbox=True
@@ -5459,7 +6565,22 @@ class Booster:
 
 						continue
 
+				changes = self.patch_localstorage()
+
+				if changes:
+					self.log_message('warning', f'Applied {changes} setting patches, reloading page...')
+
+					self.page.reload(wait_until='domcontentloaded', timeout=120000)
+
+					try:
+						self.page.wait_for_load_state('networkidle', timeout=30000)
+					except PlaywrightTimeoutError:
+						pass
+
+					self.log_message('success', 'Page reloaded, continuing...')
+
 				self.get_bearer()
+
 
 				if self.check_stop_flag():
 					self.log_message('info', 'Booster stopping - closing browser')
@@ -5501,7 +6622,7 @@ class Booster:
 							pass
 
 						try:
-							play_button = self.page.get_by_text('ИГРАТЬ', exact=True)
+							play_button = self.page.get_by_text(ui_re('play')).first
 							play_button.wait_for(state='visible', timeout=10000)
 							is_disabled = play_button.is_disabled(timeout=5000)
 							
@@ -5511,10 +6632,8 @@ class Booster:
 								play_button.click(timeout=5000)
 
 								try:
-									self.page.get_by_text('ПЕРСОНАЛИЗИРОВАННЫЕ ИГРЫ').wait_for(state='visible', timeout=3000)
-									
-									self.log_message('success', 'Play button clicked!')
-									
+									self.page.get_by_text(ui_re('custom_games')).first.wait_for(state='visible', timeout=3000)
+
 									break
 								except PlaywrightTimeoutError:
 									self.log_message('warning', 'Click did not register, retrying...')
@@ -5538,7 +6657,7 @@ class Booster:
 							break
 							
 						try:
-							self.page.get_by_text('ПЕРСОНАЛИЗИРОВАННЫЕ ИГРЫ').click(timeout=10000)
+							self.page.get_by_text(ui_re('custom_games')).first.click(timeout=10000)
 
 							break
 						except PlaywrightTimeoutError:
@@ -5568,8 +6687,19 @@ class Booster:
 						pass
 
 					self.log_message('success', 'Menu opened!')
+
 					self.ensure_english_language()
-					self.play()
+
+					has_pcg = self.check_pcg_status()
+					created = False
+
+					if has_pcg:
+						created = self.create_custom_room()
+
+						if not created:
+							return
+
+					self.play(already_in_room=created)
 
 					if self.check_stop_flag():
 						break
@@ -5692,7 +6822,7 @@ class Stalker:
 
 			return pytz.timezone(str(sys_tz))
 		except:
-			input(f'\n{Style.BRIGHT}{Back.RED}Could not detect local timezone. Defaulting to UTC.')
+			_pause(f'\n{Style.BRIGHT}{Back.RED}Could not detect local timezone. Defaulting to UTC.')
 
 			return pytz.utc
 
@@ -5723,7 +6853,7 @@ class Stalker:
 		print(f'{Style.BRIGHT}{color}Enter to refresh')
 		print(f'{Style.BRIGHT}{color}End - stop Stalker')
 
-		input() if error else print()
+		_pause() if error else print()
 
 	@property
 	def total_pages(self):
@@ -5738,6 +6868,75 @@ class Stalker:
 			'Accept': 'application/json',
 			'Content-Type': 'application/json'
 		}
+
+	def log_message(self, msg_type, message):
+		colors = {
+			'info': Fore.YELLOW,
+			'success': Fore.GREEN,
+			'error': Fore.RED,
+			'warning': Fore.YELLOW,
+			'cyan': Fore.CYAN
+		}
+		
+		color = colors.get(msg_type, Fore.WHITE)
+
+		print(f'{Style.BRIGHT}{color}{message}{Fore.RESET}')
+
+	def patch_localstorage(self):
+		changes = 0
+
+		try:
+			self.page.wait_for_function(
+				'() => localStorage.getItem("settings") !== null',
+				timeout=60000
+			)
+		except:
+			return 0
+
+		raw_settings = self.page.evaluate('() => localStorage.getItem("settings")')
+
+		try:
+			settings = json.loads(raw_settings)
+		except:
+			return 0
+
+		patches = {
+			'backgroundMusic': False,
+			'darkMode': True,
+			'showIntros': False,
+			'showRoleHints': False,
+			'showWerewolfRolesOnGameGrid': True,
+			'soundEffects': False
+		}
+
+		for key, value in patches.items():
+			if settings.get(key) != value:
+				settings[key] = value
+
+				changes += 1
+
+		if changes:
+			self.page.evaluate(f'() => localStorage.setItem("settings", JSON.stringify({json.dumps(settings)}))')
+
+		raw_intros = self.page.evaluate('() => localStorage.getItem("intros")')
+
+		if raw_intros:
+			try:
+				intros = json.loads(raw_intros)
+			except:
+				return changes
+
+			patched = {
+				k: (False if v is True else (0 if v == 1 else v))
+				for k, v in intros.items()
+			}
+
+			if patched != intros:
+				self.page.evaluate(f'() => localStorage.setItem("intros", JSON.stringify({json.dumps(patched)}))')
+
+				changes += 1
+
+		return changes
 
 	def get_bearer(self):
 		tokens = self.page.evaluate('''
@@ -6923,6 +8122,20 @@ class Stalker:
 
 						continue
 
+				changes = self.patch_localstorage()
+
+				if changes:
+					self.log_message('warning', f'Applied {changes} setting patches, reloading page...')
+
+					self.page.reload(wait_until='domcontentloaded', timeout=120000)
+
+					try:
+						self.page.wait_for_load_state('networkidle', timeout=30000)
+					except PlaywrightTimeoutError:
+						pass
+
+					self.log_message('success', 'Page reloaded, continuing...')
+
 				self.get_bearer()
 
 				while True:
@@ -6989,7 +8202,6 @@ class Spinner:
 		self.config = dotenv_values(CONFIG_PATH)
 		self.is_valid = True
 		self.app = None
-		self.should_stop = False
 
 		try:
 			self.BLUESTACKS5_EXECUTABLE = self.config['BLUESTACKS5_EXECUTABLE']
@@ -7015,6 +8227,17 @@ class Spinner:
 			self.is_valid = False
 
 			return
+
+	def check_stop_flag(self):
+		if hasattr(self, '_stop_event'):
+			return self._stop_event.is_set()
+
+		try:
+			from mentalist_gui import stop_flags
+			
+			return stop_flags.get('booster', threading.Event()).is_set()
+		except:
+			return False
 
 	def log_message(self, msg_type, message):
 		colors = {
@@ -7208,17 +8431,6 @@ class Spinner:
 				self.close_all()
 
 				continue
-
-	def check_stop_flag(self):
-		if hasattr(self, '_stop_event'):
-			return self._stop_event.is_set()
-
-		try:
-			from mentalist_gui import stop_flags
-			
-			return stop_flags.get('booster', threading.Event()).is_set()
-		except:
-			return self.should_stop
 
 	def run(self):
 		try:

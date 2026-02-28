@@ -251,7 +251,6 @@ setup(
 			'always_allow_keywords': True,
 			'emit_code_comments': False,
 			'boundscheck': False,
-			'wraparound': False,
 			'initializedcheck': False,
 			'nonecheck': False,
 			'overflowcheck': False,
@@ -327,6 +326,7 @@ setup(
 		for module in self.compiled_modules:
 			pyd_files = list(self.project_root.glob(f'{module}*.pyd'))
 			so_files = list(self.project_root.glob(f'{module}*.so'))
+			
 			extensions.extend(pyd_files)
 			extensions.extend(so_files)
 
@@ -340,7 +340,7 @@ class PyInstallerBuilder:
 		self.build_dir = build_dir
 		self.hidden_imports = [
 			'auth_protection', 'auth_client', 'auth_decorator', 'data_protection',
-			'updater', 'mentalist', 'mentalist_cli', 'mentalist_gui',
+			'translations','updater', 'mentalist', 'mentalist_cli', 'mentalist_gui',
 
 			'pyautogui', 'pywinauto', 'pygetwindow', 'psutil', 'ntplib', 
 			'playsound3', 'pyscreeze', 'pytweening', 'mouseinfo', 'pymsgbox', 'pyrect',
@@ -371,7 +371,7 @@ class PyInstallerBuilder:
 			'plotly.graph_objects', 'plotly.figure_factory', 'plotly.subplots', 'plotly.express'
 		]
 	
-	def build(self, entry_script, exe_name, console_mode, icon_path, compiled_extensions, data_items):
+	def build(self, entry_script, exe_name, console_mode, icon_path, splash_path, compiled_extensions, data_items):
 		if not entry_script.exists():
 			return False
 		
@@ -393,7 +393,10 @@ class PyInstallerBuilder:
 		
 		if icon_path and icon_path.exists():
 			command.append(f'--icon={icon_path}')
-		
+
+		if splash_path and splash_path.exists():
+			command.append(f'--splash={splash_path}')
+
 		for hidden_import in self.hidden_imports:
 			command.extend(['--hidden-import', hidden_import])
 		
@@ -460,7 +463,7 @@ class BuildOrchestrator:
 			'gui': {
 				'name': 'Mentalist GUI',
 				'script': 'mentalist_gui.py',
-				'console': True
+				'console': False
 			}
 		}
 
@@ -469,6 +472,7 @@ class BuildOrchestrator:
 			'auth_decorator.py',
 			'auth_protection.py',
 			'data_protection.py',
+			'translations.py',
 			'updater.py'
 		]
 		self.core_modules = ['mentalist.py']
@@ -497,6 +501,7 @@ class BuildOrchestrator:
 			'auth_client', 
 			'auth_decorator',
 			'data_protection',
+			'translations',
 			'updater',
 			'mentalist'
 		]
@@ -598,17 +603,17 @@ class BuildOrchestrator:
 		self.temp_build_env.mkdir(parents=True, exist_ok=True)
 		
 		py_files = [f for f in self.project_root.glob('*.py') if f.name not in ['build.py', 'admin_cli.py', 'upload_update.py']]
-		icon_files = list(self.project_root.glob('*.ico'))
+		image_files = list(self.project_root.glob('*.png')) + list(self.project_root.glob('*.ico'))
 
 		for py_file in py_files:
 			shutil.copy2(py_file, self.temp_build_env / py_file.name)
 
 			self.print_info(f'Copied: {py_file.name}')
-		
-		for icon in icon_files:
-			shutil.copy2(icon, self.temp_build_env / icon.name)
 
-			self.print_info(f'Copied: {icon.name}')
+		for image in image_files:
+			shutil.copy2(image, self.temp_build_env / image.name)
+
+			self.print_info(f'Copied: {image.name}')
 
 		folders_to_copy = ['gui', 'assets', 'audio', 'images']
 
@@ -702,6 +707,7 @@ class BuildOrchestrator:
 			'auth_client.py': self.temp_build_env / 'auth_client.py',
 			'auth_decorator.py': self.temp_build_env / 'auth_decorator.py',
 			'data_protection.py': self.temp_build_env / 'data_protection.py',
+			'translations.py': self.temp_build_env / 'translations.py',
 			'updater.py': self.temp_build_env / 'updater.py',
 			'mentalist.py': self.temp_build_env / 'mentalist.py'
 		}
@@ -754,6 +760,7 @@ class BuildOrchestrator:
 		exe_name = f'{config["name"]}_v{self.version}.exe'
 		
 		icon_path = self.temp_build_env / 'favicon.ico'
+		splash_path = self.temp_build_env / 'favicon.png'
 
 		compiled_extensions = self.cython_compiler.get_compiled_extensions()
 
@@ -780,7 +787,7 @@ class BuildOrchestrator:
 
 		self.pyinstaller = PyInstallerBuilder(self.temp_build_env, self.dist_dir, self.build_dir)
 		
-		if self.pyinstaller.build(entry_script, exe_name, config['console'], icon_path, compiled_extensions, data_items):
+		if self.pyinstaller.build(entry_script, exe_name, config['console'], icon_path, splash_path, compiled_extensions, data_items):
 			self.print_success(f'{config["name"]} built successfully')
 			
 			return True
