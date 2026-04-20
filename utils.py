@@ -185,37 +185,37 @@ CONFIG_PATH = Path(os.path.join(BASE_DIR, 'config.txt'))
 
 
 def check_updates_on_startup():
-    try:
-        config = dotenv_values(CONFIG_PATH)
+	try:
+		config = dotenv_values(CONFIG_PATH)
 
-        if config.get('SERVER_SYNC_ENABLED') != 'true':
-            return
+		if config.get('SERVER_SYNC_ENABLED') != 'true':
+			return
 
-        updater = MentalistUpdater(
-            server_url=config.get('MENTALIST_SERVER_URL'),
-            api_key=config.get('MENTALIST_SERVER_API_KEY'),
-            current_version=VERSION
-        )
+		updater = MentalistUpdater(
+			server_url=config.get('MENTALIST_SERVER_URL'),
+			api_key=config.get('MENTALIST_SERVER_API_KEY'),
+			current_version=VERSION
+		)
 
-        update_available, info = updater.check_for_updates(silent=False)
+		update_available, info = updater.check_for_updates(silent=False)
 
-        if update_available:
-            print(f'Version {info.get("version")} available!')
-    except:
-        pass
+		if update_available:
+			print(f'Version {info.get("version")} available!')
+	except:
+		pass
 
 
 def banner(module=None):
-    os.system('cls' if os.name == 'nt' else 'clear')
+	os.system('cls' if os.name == 'nt' else 'clear')
 
-    message = f'{Style.BRIGHT}{Fore.RED}{"=" * 60}{Fore.RESET}\n'
-    message += f'{Style.BRIGHT}{Fore.RED}Men{Fore.YELLOW}tal{Fore.WHITE}ist {Fore.CYAN}{_launch_mode.upper()}{Fore.RESET}'
+	message = f'{Style.BRIGHT}{Fore.RED}{"=" * 60}{Fore.RESET}\n'
+	message += f'{Style.BRIGHT}{Fore.RED}Men{Fore.YELLOW}tal{Fore.WHITE}ist {Fore.CYAN}{_launch_mode.upper()}{Fore.RESET}'
 
-    if module:
-        message += f'{Fore.RED} | {module}'
+	if module:
+		message += f'{Fore.RED} | {module}'
 
-    message += f'\n{Style.BRIGHT}{Fore.MAGENTA}by Corruptor{Fore.RESET}\n'
-    message += f'\n{Style.DIM}{Fore.CYAN}Press Ctrl+C to quit{Style.RESET_ALL}\n'
-    message += f'{Style.BRIGHT}{Fore.RED}{"=" * 60}{Fore.RESET}\n'
+	message += f'\n{Style.BRIGHT}{Fore.MAGENTA}by Corruptor{Fore.RESET}\n'
+	message += f'\n{Style.DIM}{Fore.CYAN}Press Ctrl+C to quit{Style.RESET_ALL}\n'
+	message += f'{Style.BRIGHT}{Fore.RED}{"=" * 60}{Fore.RESET}\n'
 
-    print(message)
+	print(message)

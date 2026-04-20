@@ -1949,144 +1949,144 @@ class Booster:
 		return True
 
 	def filter_combos(self, combos):
-	    result = []
+		result = []
 
-	    for combo in combos:
-	        counts = Counter(combo)
+		for combo in combos:
+			counts = Counter(combo)
 
-	        has_vigilante = counts.get('vigilante', 0) > 0
-	        has_gunner = counts.get('gunner', 0) > 0
+			has_vigilante = counts.get('vigilante', 0) > 0
+			has_gunner = counts.get('gunner', 0) > 0
 
-	        if not (has_vigilante or has_gunner):
-	            continue
+			if not (has_vigilante or has_gunner):
+				continue
 
-	        if has_vigilante and has_gunner:
-	            continue
+			if has_vigilante and has_gunner:
+				continue
 
-	        if counts.get('priest', 0) < 1:
-	            continue
+			if counts.get('priest', 0) < 1:
+				continue
 
-	        has_jww = counts.get('junior-werewolf', 0) > 0
-	        has_split = counts.get('split-wolf', 0) > 0
+			has_jww = counts.get('junior-werewolf', 0) > 0
+			has_split = counts.get('split-wolf', 0) > 0
 
-	        if not (has_jww or has_split):
-	            continue
+			if not (has_jww or has_split):
+				continue
 
-	        if has_jww and has_split:
-	            continue
+			if has_jww and has_split:
+				continue
 
-	        if counts.get('stubborn-werewolf', 0) > 0:
-	            continue
+			if counts.get('stubborn-werewolf', 0) > 0:
+				continue
 
-	        result.append(combo)
+			result.append(combo)
 
-	    return result
+		return result
 
 	def pick_fill_roles(self, base, n, offset=0):
-	    counts = Counter(base)
-	    killing_used = sum(counts[r] for r in counts if r in self.KILLING_ROLES)
-	    protecting_used = sum(counts[r] for r in counts if r in self.PROTECTING_ROLES)
-	    inv_used = sum(counts[r] for r in counts if r in self.INVESTIGATIVE_ROLES)
+		counts = Counter(base)
+		killing_used = sum(counts[r] for r in counts if r in self.KILLING_ROLES)
+		protecting_used = sum(counts[r] for r in counts if r in self.PROTECTING_ROLES)
+		inv_used = sum(counts[r] for r in counts if r in self.INVESTIGATIVE_ROLES)
 
-	    village_pool = sorted(self.VILLAGE_ROLES - self.NOT_ALLOWED_ROLES)
+		village_pool = sorted(self.VILLAGE_ROLES - self.NOT_ALLOWED_ROLES)
 
-	    rng = random.Random(offset)
-	    rng.shuffle(village_pool)
+		rng = random.Random(offset)
+		rng.shuffle(village_pool)
 
-	    fill = []
-	    fill_counts = Counter()
+		fill = []
+		fill_counts = Counter()
 
-	    for role in village_pool:
-	        if len(fill) >= n:
-	            break
+		for role in village_pool:
+			if len(fill) >= n:
+				break
 
-	        total = counts.get(role, 0) + fill_counts.get(role, 0)
+			total = counts.get(role, 0) + fill_counts.get(role, 0)
 
-	        if total >= self.get_role_max(role):
-	            continue
+			if total >= self.get_role_max(role):
+				continue
 
-	        if role in self.KILLING_ROLES and killing_used >= self.KILLING_MAX:
-	            continue
+			if role in self.KILLING_ROLES and killing_used >= self.KILLING_MAX:
+				continue
 
-	        if role in self.PROTECTING_ROLES and protecting_used >= self.PROTECTING_MAX:
-	            continue
+			if role in self.PROTECTING_ROLES and protecting_used >= self.PROTECTING_MAX:
+				continue
 
-	        if role in self.INVESTIGATIVE_ROLES and inv_used >= self.INVESTIGATIVE_MAX:
-	            continue
+			if role in self.INVESTIGATIVE_ROLES and inv_used >= self.INVESTIGATIVE_MAX:
+				continue
 
-	        fill.append(role)
-	        fill_counts[role] += 1
+			fill.append(role)
+			fill_counts[role] += 1
 
-	        if role in self.KILLING_ROLES:
-	            killing_used += 1
+			if role in self.KILLING_ROLES:
+				killing_used += 1
 
-	        if role in self.PROTECTING_ROLES:
-	            protecting_used += 1
+			if role in self.PROTECTING_ROLES:
+				protecting_used += 1
 
-	        if role in self.INVESTIGATIVE_ROLES:
-	            inv_used += 1
+			if role in self.INVESTIGATIVE_ROLES:
+				inv_used += 1
 
-	    while len(fill) < n:
-	        if counts.get('villager', 0) + fill.count('villager') < self.get_role_max('villager'):
-	            fill.append('villager')
+		while len(fill) < n:
+			if counts.get('villager', 0) + fill.count('villager') < self.get_role_max('villager'):
+				fill.append('villager')
 
-	        else:
-	            return
+			else:
+				return
 
-	    return fill
+		return fill
 
 	def generate_xp_combos(self, target_sizes=(8, 10, 12, 16), max_per_size=1000, seed=42):
-	    random.seed(seed)
+		random.seed(seed)
 
-	    usable_ww = sorted(self.WW_ROLES - self.NOT_ALLOWED_ROLES)
-	    usable_solo = sorted(self.SOLO_ROLES - self.NOT_ALLOWED_ROLES)
-	    usable_rv = sorted(self.RV_ROLES - self.NOT_ALLOWED_ROLES)
+		usable_ww = sorted(self.WW_ROLES - self.NOT_ALLOWED_ROLES)
+		usable_solo = sorted(self.SOLO_ROLES - self.NOT_ALLOWED_ROLES)
+		usable_rv = sorted(self.RV_ROLES - self.NOT_ALLOWED_ROLES)
 
-	    ww_combos = list(combinations(usable_ww, 4))
+		ww_combos = list(combinations(usable_ww, 4))
 
-	    results = []
-	    seen = set()
+		results = []
+		seen = set()
 
-	    for target_size in target_sizes:
-	        fill_slots = target_size - 6
-	        size_results = []
+		for target_size in target_sizes:
+			fill_slots = target_size - 6
+			size_results = []
 
-	        if fill_slots < 0:
-	            continue
+			if fill_slots < 0:
+				continue
 
-	        ww_shuffled = ww_combos[:]
-	        random.shuffle(ww_shuffled)
+			ww_shuffled = ww_combos[:]
+			random.shuffle(ww_shuffled)
 
-	        for idx, ww_4 in enumerate(ww_shuffled):
-	            if len(size_results) >= max_per_size:
-	                break
+			for idx, ww_4 in enumerate(ww_shuffled):
+				if len(size_results) >= max_per_size:
+					break
 
-	            for solo in usable_solo:
-	                if len(size_results) >= max_per_size:
-	                    break
+				for solo in usable_solo:
+					if len(size_results) >= max_per_size:
+						break
 
-	                for rv in usable_rv:
-	                    if len(size_results) >= max_per_size:
-	                        break
+					for rv in usable_rv:
+						if len(size_results) >= max_per_size:
+							break
 
-	                    base = list(ww_4) + [solo, rv]
-	                    fill = self.pick_fill_roles(base, fill_slots, offset=seed + idx)
+						base = list(ww_4) + [solo, rv]
+						fill = self.pick_fill_roles(base, fill_slots, offset=seed + idx)
 
-	                    if fill is None:
-	                        continue
+						if fill is None:
+							continue
 
-	                    combo = tuple(sorted(base + fill))
+						combo = tuple(sorted(base + fill))
 
-	                    if combo in seen:
-	                        continue
+						if combo in seen:
+							continue
 
-	                    if self.validate_combo(list(combo)):
-	                        seen.add(combo)
-	                        size_results.append(list(combo))
+						if self.validate_combo(list(combo)):
+							seen.add(combo)
+							size_results.append(list(combo))
 
-	        results.extend(size_results)
+			results.extend(size_results)
 
-	    return results
+		return results
 
 	def generate_room_configs(self, count=5):
 		PHRASES = [

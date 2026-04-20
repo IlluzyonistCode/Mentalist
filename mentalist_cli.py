@@ -34,6 +34,7 @@ from stalker import Stalker
 from spinner import SpinnerDesktop, SpinnerMobile
 
 set_launch_mode('CLI')
+VERSION = '1.0.4'
 
 
 def main():

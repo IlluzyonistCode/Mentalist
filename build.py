@@ -336,9 +336,9 @@ class PyInstallerBuilder:
 		self.dist_dir = dist_dir
 		self.build_dir = build_dir
 		self.hidden_imports = [
-	        'auth_protection', 'auth_client', 'auth_decorator', 'data_protection',
-	        'mentalist_cli', 'mentalist_gui', 'translations', 'updater', 'utils',
-	        'analytics', 'mastermind', 'tracker', 'booster', 'stalker', 'spinner',
+			'auth_protection', 'auth_client', 'auth_decorator', 'data_protection',
+			'mentalist_cli', 'mentalist_gui', 'translations', 'updater', 'utils',
+			'analytics', 'mastermind', 'tracker', 'booster', 'stalker', 'spinner',
 
 			'pyautogui', 'pywinauto', 'pygetwindow', 'psutil', 'ntplib', 
 			'playsound3', 'pyscreeze', 'pytweening', 'mouseinfo', 'pymsgbox', 'pyrect',
@@ -475,13 +475,13 @@ class BuildOrchestrator:
 		]
 
 		self.core_modules = [
-		    'utils.py',
-		    'analytics.py',
-		    'mastermind.py',
-		    'tracker.py',
-		    'booster.py',
-		    'stalker.py',
-		    'spinner.py'
+			'utils.py',
+			'analytics.py',
+			'mastermind.py',
+			'tracker.py',
+			'booster.py',
+			'stalker.py',
+			'spinner.py'
 		]
 	
 	def extract_version(self):
@@ -500,40 +500,40 @@ class BuildOrchestrator:
 		return '1.0.0'
 
 	def find_compiled_modules(self):
-	    pyd_files = {}
+		pyd_files = {}
 
-	    search_paths = [self.temp_build_env / 'build']
+		search_paths = [self.temp_build_env / 'build']
 
-	    target_modules = [
-	        'auth_client',
-	        'auth_decorator',
-	        'data_protection',
-	        'translations',
-	        'updater',
-	        'utils',
-	        'analytics',
-	       	'mastermind',
-	        'tracker',
-	        'booster',
-	        'stalker',
-	        'spinner'
-	    ]
+		target_modules = [
+			'auth_client',
+			'auth_decorator',
+			'data_protection',
+			'translations',
+			'updater',
+			'utils',
+			'analytics',
+			'mastermind',
+			'tracker',
+			'booster',
+			'stalker',
+			'spinner'
+		]
 
-	    for search_path in search_paths:
-	        if not search_path.exists():
-	            continue
+		for search_path in search_paths:
+			if not search_path.exists():
+				continue
 
-	        for pyd_file in search_path.rglob('*.pyd'):
-	            for module in target_modules:
-	                if module in pyd_file.stem:
-	                    pyd_files[module] = pyd_file
+			for pyd_file in search_path.rglob('*.pyd'):
+				for module in target_modules:
+					if module in pyd_file.stem:
+						pyd_files[module] = pyd_file
 
-	        for so_file in search_path.rglob('*.so'):
-	            for module in target_modules:
-	                if module in so_file.stem:
-	                    pyd_files[module] = so_file
+			for so_file in search_path.rglob('*.so'):
+				for module in target_modules:
+					if module in so_file.stem:
+						pyd_files[module] = so_file
 
-	    return pyd_files
+		return pyd_files
 
 	def print_header(self, title):
 		print(f'\n{Style.BRIGHT}{Fore.CYAN}{"="*80}{Fore.RESET}')
@@ -665,7 +665,7 @@ class BuildOrchestrator:
 	def inject_decoy_layers(self):
 		self.print_step('Injecting decoy layers into sandbox...')
 		
-		target_modules = ['mastermind.py', 'tracker.py', 'booster.py'. 'stalker.py', 'spinner.py', 'auth_client.py']
+		target_modules = ['mastermind.py', 'tracker.py', 'booster.py', 'stalker.py', 'spinner.py', 'auth_client.py']
 		
 		for module_name in target_modules:
 			sandbox_module_path = self.temp_build_env / module_name
@@ -716,20 +716,20 @@ class BuildOrchestrator:
 	def finalize_integrity_system(self):
 		self.print_step('Finalizing integrity system...')
 
-	    py_files = {
-	        'auth_client.py': self.temp_build_env / 'auth_client.py',
-	        'auth_decorator.py': self.temp_build_env / 'auth_decorator.py',
-	        'data_protection.py':self.temp_build_env / 'data_protection.py',
-	        'translations.py': self.temp_build_env / 'translations.py',
-	        'updater.py': self.temp_build_env / 'updater.py',
-	        'utils.py': self.temp_build_env / 'utils.py',
-	        'analytics.py': self.temp_build_env / 'analytics.py',
-	        'mastermind.py': self.temp_build_env / 'mastermind.py',
-	        'tracker.py': self.temp_build_env / 'tracker.py',
-	        'booster.py': self.temp_build_env / 'booster.py',
-	        'stalker.py': self.temp_build_env / 'stalker.py',
-	        'spinner.py': self.temp_build_env / 'spinner.py'
-	    }
+		py_files = {
+			'auth_client.py': self.temp_build_env / 'auth_client.py',
+			'auth_decorator.py': self.temp_build_env / 'auth_decorator.py',
+			'data_protection.py':self.temp_build_env / 'data_protection.py',
+			'translations.py': self.temp_build_env / 'translations.py',
+			'updater.py': self.temp_build_env / 'updater.py',
+			'utils.py': self.temp_build_env / 'utils.py',
+			'analytics.py': self.temp_build_env / 'analytics.py',
+			'mastermind.py': self.temp_build_env / 'mastermind.py',
+			'tracker.py': self.temp_build_env / 'tracker.py',
+			'booster.py': self.temp_build_env / 'booster.py',
+			'stalker.py': self.temp_build_env / 'stalker.py',
+			'spinner.py': self.temp_build_env / 'spinner.py'
+		}
 		
 		for module_name, filepath in py_files.items():
 			if filepath.exists():
