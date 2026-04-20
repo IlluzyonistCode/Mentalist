@@ -12,8 +12,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
         const initResult = await eel.stalker_start()();
         console.log('Engine status:', initResult);
-    } catch (e) {
-        console.error('Failed to ensure engine start:', e);
+    } catch (error) {
+        console.error('Failed to ensure engine start:', error);
     }
 
     await loadTargets(1);
@@ -61,8 +61,8 @@ async function updateTargets() {
         const result = await eel.stalker_update_targets()();
 
         if (result.success) setTimeout(() => loadTargets(stalkerData.currentPage), 3000);
-    } catch (e) {
-        console.error(e);
+    } catch (error) {
+        console.error(error);
     }
 }
 
@@ -211,8 +211,8 @@ async function addTarget() {
 
             await loadTargets(1);
         } else alert(result.error || 'Failed to add target');
-    } catch (e) {
-        console.error(e);
+    } catch (error) {
+        console.error(error);
     }
 }
 
@@ -223,8 +223,8 @@ async function deleteTarget(id) {
         const result = await eel.stalker_delete_target(id)();
 
         if (result.success) await loadTargets(stalkerData.currentPage);
-    } catch (e) {
-        console.error(e);
+    } catch (error) {
+        console.error(error);
     }
 }
 

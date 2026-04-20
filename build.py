@@ -1,13 +1,10 @@
 import shutil
 import subprocess
 import hashlib
-import base64
 import json
 import os
 import sys
 import re
-import marshal
-import zlib
 import random
 import time
 import undetected_playwright
@@ -339,8 +336,9 @@ class PyInstallerBuilder:
 		self.dist_dir = dist_dir
 		self.build_dir = build_dir
 		self.hidden_imports = [
-			'auth_protection', 'auth_client', 'auth_decorator', 'data_protection',
-			'translations','updater', 'mentalist', 'mentalist_cli', 'mentalist_gui',
+	        'auth_protection', 'auth_client', 'auth_decorator', 'data_protection',
+	        'mentalist_cli', 'mentalist_gui', 'translations', 'updater', 'utils',
+	        'analytics', 'mastermind', 'tracker', 'booster', 'stalker', 'spinner',
 
 			'pyautogui', 'pywinauto', 'pygetwindow', 'psutil', 'ntplib', 
 			'playsound3', 'pyscreeze', 'pytweening', 'mouseinfo', 'pymsgbox', 'pyrect',
@@ -360,7 +358,7 @@ class PyInstallerBuilder:
 			'asyncio', 'nest_asyncio', 'gevent', 'gevent.monkey',
 			
 			'colorama', 'dotenv', 'tzlocal', 'pytz', 'dateutil', 'dateutil.parser',
-			'jaraco.text', 'PIL', 'PIL.Image', 'cv2',
+			'jaraco.text', 'PIL', 'PIL.Image', 'cv2', 'uiautomator2'
 
 			'cryptography', 'cryptography.fernet', 'cryptography.hazmat.primitives', 'cryptography.hazmat.backends',
 			'base64', 'marshal', 'zlib', 'ctypes', 'uuid', 'hashlib', 'hmac', 'tkinter', '_tkinter'
@@ -446,7 +444,7 @@ class BuildOrchestrator:
 		self.build_dir = self.project_root / 'build'
 		self.releases_dir = self.project_root / 'releases'
 		
-		self.version = self._extract_version()
+		self.version = self.extract_version()
 		self.build_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 		
 		self.integrity_manager = IntegrityManager()
@@ -475,11 +473,20 @@ class BuildOrchestrator:
 			'translations.py',
 			'updater.py'
 		]
-		self.core_modules = ['mentalist.py']
+
+		self.core_modules = [
+		    'utils.py',
+		    'analytics.py',
+		    'mastermind.py',
+		    'tracker.py',
+		    'booster.py',
+		    'stalker.py',
+		    'spinner.py'
+		]
 	
-	def _extract_version(self):
+	def extract_version(self):
 		try:
-			mentalist_path = self.project_root / 'mentalist.py'
+			mentalist_path = self.project_root / 'mentalist_cli.py'
 			
 			if mentalist_path.exists():
 				content = mentalist_path.read_text(encoding='utf-8')
@@ -492,35 +499,41 @@ class BuildOrchestrator:
 
 		return '1.0.0'
 
-	def _find_compiled_modules(self):
-		pyd_files = {}
+	def find_compiled_modules(self):
+	    pyd_files = {}
 
-		search_paths = [self.temp_build_env / 'build']
+	    search_paths = [self.temp_build_env / 'build']
 
-		target_modules = [
-			'auth_client', 
-			'auth_decorator',
-			'data_protection',
-			'translations',
-			'updater',
-			'mentalist'
-		]
-		
-		for search_path in search_paths:
-			if not search_path.exists():
-				continue
+	    target_modules = [
+	        'auth_client',
+	        'auth_decorator',
+	        'data_protection',
+	        'translations',
+	        'updater',
+	        'utils',
+	        'analytics',
+	       	'mastermind',
+	        'tracker',
+	        'booster',
+	        'stalker',
+	        'spinner'
+	    ]
 
-			for pyd_file in search_path.rglob('*.pyd'):
-				for module in target_modules:
-					if module in pyd_file.stem:
-						pyd_files[module] = pyd_file
+	    for search_path in search_paths:
+	        if not search_path.exists():
+	            continue
 
-			for so_file in search_path.rglob('*.so'):
-				for module in target_modules:
-					if module in so_file.stem:
-						pyd_files[module] = so_file
-		
-		return pyd_files
+	        for pyd_file in search_path.rglob('*.pyd'):
+	            for module in target_modules:
+	                if module in pyd_file.stem:
+	                    pyd_files[module] = pyd_file
+
+	        for so_file in search_path.rglob('*.so'):
+	            for module in target_modules:
+	                if module in so_file.stem:
+	                    pyd_files[module] = so_file
+
+	    return pyd_files
 
 	def print_header(self, title):
 		print(f'\n{Style.BRIGHT}{Fore.CYAN}{"="*80}{Fore.RESET}')
@@ -652,7 +665,7 @@ class BuildOrchestrator:
 	def inject_decoy_layers(self):
 		self.print_step('Injecting decoy layers into sandbox...')
 		
-		target_modules = ['mentalist.py', 'auth_client.py']
+		target_modules = ['mastermind.py', 'tracker.py', 'booster.py'. 'stalker.py', 'spinner.py', 'auth_client.py']
 		
 		for module_name in target_modules:
 			sandbox_module_path = self.temp_build_env / module_name
@@ -703,21 +716,27 @@ class BuildOrchestrator:
 	def finalize_integrity_system(self):
 		self.print_step('Finalizing integrity system...')
 
-		py_files = {
-			'auth_client.py': self.temp_build_env / 'auth_client.py',
-			'auth_decorator.py': self.temp_build_env / 'auth_decorator.py',
-			'data_protection.py': self.temp_build_env / 'data_protection.py',
-			'translations.py': self.temp_build_env / 'translations.py',
-			'updater.py': self.temp_build_env / 'updater.py',
-			'mentalist.py': self.temp_build_env / 'mentalist.py'
-		}
+	    py_files = {
+	        'auth_client.py': self.temp_build_env / 'auth_client.py',
+	        'auth_decorator.py': self.temp_build_env / 'auth_decorator.py',
+	        'data_protection.py':self.temp_build_env / 'data_protection.py',
+	        'translations.py': self.temp_build_env / 'translations.py',
+	        'updater.py': self.temp_build_env / 'updater.py',
+	        'utils.py': self.temp_build_env / 'utils.py',
+	        'analytics.py': self.temp_build_env / 'analytics.py',
+	        'mastermind.py': self.temp_build_env / 'mastermind.py',
+	        'tracker.py': self.temp_build_env / 'tracker.py',
+	        'booster.py': self.temp_build_env / 'booster.py',
+	        'stalker.py': self.temp_build_env / 'stalker.py',
+	        'spinner.py': self.temp_build_env / 'spinner.py'
+	    }
 		
 		for module_name, filepath in py_files.items():
 			if filepath.exists():
 				if self.integrity_manager.register_py_file(filepath, module_name):
 					self.print_info(f'Registered .py: {module_name}')
 
-		pyd_files = self._find_compiled_modules()
+		pyd_files = self.find_compiled_modules()
 		
 		for module_name, pyd_path in pyd_files.items():
 			if pyd_path.exists():

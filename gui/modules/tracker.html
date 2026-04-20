@@ -11,37 +11,72 @@
 </head>
 
 <body>
-    <header class="tracker-header">
-        <a href="#" class="back-button disabled" id="backButton" onclick="handleBackNavigation(event)">← BACK</a>
-        <h1>TRACKER</h1>
-        <div class="header-actions">
-            <button class="action-btn" onclick="updatePlayers()" title="Update data">🔄</button>
-            <button class="action-btn" onclick="showMastermind()" title="Run Mastermind AI">🧠</button>
-            <button class="action-btn" onclick="showHelp()" title="Commands Help">❓</button>
+    <div class="tracker-layout">
+        <div class="tracker-main">
+            <header class="tracker-header">
+                <a href="#" class="back-button disabled" id="backButton" onclick="handleBackNavigation(event)">← BACK</a>
+                <h1>TRACKER</h1>
+                <div class="header-actions">
+                    <button class="action-btn" onclick="updatePlayers()" title="Update data">🔄</button>
+                    <button class="action-btn" onclick="showMastermind()" title="Run Mastermind AI">🧠</button>
+                    <button class="action-btn" id="analyticsToggleBtn" onclick="toggleAnalytics()" title="Analytics panel">📊</button>
+                    <button class="action-btn" onclick="showHelp()" title="Commands Help">❓</button>
+                </div>
+            </header>
+            <div class="remaining-panel" id="remainingPanel">
+                <div class="remaining-section">
+                    <span class="remaining-label remaining-good">GOOD:</span>
+                    <span class="remaining-roles" id="remainingGood">---</span>
+                </div>
+                <div class="remaining-section">
+                    <span class="remaining-label remaining-evil">EVIL:</span>
+                    <span class="remaining-roles" id="remainingEvil">---</span>
+                </div>
+                <div class="remaining-section">
+                    <span class="remaining-label remaining-unknown">UNKNOWN:</span>
+                    <span class="remaining-roles" id="remainingUnknown">---</span>
+                </div>
+            </div>
+            <div class="command-bar">
+                <input type="text" id="commandInput" placeholder="Initializing..." autocomplete="off" disabled>
+                <div class="autocomplete-dropdown" id="autocompleteDropdown"></div>
+            </div>
+            <div class="players-container">
+                <div class="players-grid" id="playersGrid">
+                    <div style="grid-column: 1/-1; text-align:center; padding: 2rem; color: var(--text-muted);">
+                        Waiting for game start...
+                    </div>
+                </div>
+            </div>
         </div>
-    </header>
-    <div class="remaining-panel" id="remainingPanel">
-        <div class="remaining-section">
-            <span class="remaining-label remaining-good">GOOD:</span>
-            <span class="remaining-roles" id="remainingGood">---</span>
-        </div>
-        <div class="remaining-section">
-            <span class="remaining-label remaining-evil">EVIL:</span>
-            <span class="remaining-roles" id="remainingEvil">---</span>
-        </div>
-        <div class="remaining-section">
-            <span class="remaining-label remaining-unknown">UNKNOWN:</span>
-            <span class="remaining-roles" id="remainingUnknown">---</span>
-        </div>
-    </div>
-    <div class="command-bar">
-        <input type="text" id="commandInput" placeholder="Initializing..." autocomplete="off" disabled>
-        <div class="autocomplete-dropdown" id="autocompleteDropdown"></div>
-    </div>
-    <div class="players-container">
-        <div class="players-grid" id="playersGrid">
-            <div style="grid-column: 1/-1; text-align:center; padding: 2rem; color: var(--text-muted);">
-                Waiting for game start...
+        <div class="analytics-sidebar collapsed" id="analyticsSidebar">
+            <div class="analytics-header">
+                <span class="analytics-header-title">Analytics</span>
+            </div>
+            <div class="analytics-tabs">
+                <button class="analytics-tab active" onclick="switchAnalyticsTab('bayes', this)">BAYES</button>
+                <button class="analytics-tab" onclick="switchAnalyticsTab('nlp', this)">NLP</button>
+                <button class="analytics-tab" onclick="switchAnalyticsTab('graph', this)">GRAPH</button>
+            </div>
+            <div class="analytics-body" id="analyticsBody">
+                <div class="tab-pane active" id="tab-bayes">
+                    <div id="bayesPlayerList">
+                        <div class="graph-empty">No data yet</div>
+                    </div>
+                </div>
+                <div class="tab-pane" id="tab-nlp">
+                    <div id="nlpPlayerList">
+                        <div class="graph-empty">No data yet</div>
+                    </div>
+                </div>
+                <div class="tab-pane" id="tab-graph">
+                    <div class="graph-empty" id="graphEmpty">No mention data yet</div>
+                    <svg id="mentionGraphSvg" height="0"></svg>
+                </div>
+            </div>
+            <div class="bayes-detail" id="analyticsDetail" style="display:none">
+                <div class="bayes-detail-title" id="analyticsDetailTitle">—</div>
+                <div id="analyticsDetailContent"></div>
             </div>
         </div>
     </div>
@@ -161,6 +196,7 @@
             </div>
         </div>
     </div>
+
     <script src="../eel.js"></script>
     <script src="../js/utils.js"></script>
     <script>
@@ -190,24 +226,19 @@
 
         const backButton = document.getElementById('backButton');
 
-        if (backButton.classList.contains('disabled')) {
-            console.log('Navigation blocked - module not ready or already stopping');
-            
-            return;
-        }
+        if (backButton.classList.contains('disabled')) return;
 
         backButton.classList.add('disabled');
         backButton.textContent = '← STOPPING...';
 
         try {
-            console.log('Stopping Tracker module...');
-
             await eel.tracker_stop()();
             await new Promise(resolve => setTimeout(resolve, 500));
 
             window.location.href = '../index.html';
         } catch (error) {
             console.error('Navigation error:', error);
+
             window.location.href = '../index.html';
         }
     }
@@ -216,16 +247,12 @@
         eel.expose(tracker_initialization_complete);
 
         function tracker_initialization_complete() {
-            console.log('Tracker initialization complete');
-
             enableControls();
         }
 
         eel.expose(tracker_initialization_failed);
 
         function tracker_initialization_failed() {
-            console.error('Tracker initialization failed');
-
             enableControls();
 
             const backButton = document.getElementById('backButton');
@@ -238,9 +265,7 @@
         if (isInitialized) {
             try {
                 await eel.tracker_stop()();
-            } catch (e) {
-                console.log('Cleanup error:', e);
-            }
+            } catch (e) {}
         }
     });
     </script>

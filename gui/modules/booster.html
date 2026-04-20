@@ -21,21 +21,29 @@
     </header>
     <div class="booster-container">
         <div class="stats-panel">
-            <div class="stat-card">
-                <div class="stat-label">GAMES PLAYED</div>
-                <div class="stat-value" id="gamesPlayed">0</div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">GAMES PLAYED</div>
+                    <div class="stat-value" id="gamesPlayed">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">AS WEREWOLF</div>
+                    <div class="stat-value werewolf" id="werewolfGames">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">AS VILLAGER</div>
+                    <div class="stat-value villager" id="villagerGames">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">AS SOLO</div>
+                    <div class="stat-value solo" id="soloGames">0</div>
+                </div>
             </div>
-            <div class="stat-card">
-                <div class="stat-label">AS WEREWOLF</div>
-                <div class="stat-value werewolf" id="werewolfGames">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">AS VILLAGER</div>
-                <div class="stat-value villager" id="villagerGames">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">UPTIME</div>
-                <div class="stat-value" id="uptime">00:00:00</div>
+            <div class="stats-side">
+                <div class="stat-card stat-card--uptime">
+                    <div class="stat-label">UPTIME</div>
+                    <div class="stat-value stat-value--uptime" id="uptime">00:00:00</div>
+                </div>
             </div>
         </div>
         <div class="game-state-panel">
@@ -53,6 +61,20 @@
                     <span class="state-label">Action:</span>
                     <span class="state-value" id="currentAction">Idle</span>
                 </div>
+                <div class="state-row state-row--toggle">
+                    <span class="state-label">Mode:</span>
+                    <button class="mode-toggle" id="guestModeToggle" onclick="toggleGuestMode()">
+                        <span class="mode-toggle__knob"></span>
+                        <span class="mode-toggle__label" id="guestModeLabel">HOST</span>
+                    </button>
+                </div>
+                <div class="state-row state-row--toggle">
+                    <span class="state-label">Browser:</span>
+                    <button class="mode-toggle" id="headlessModeToggle" onclick="toggleHeadlessMode()">
+                        <span class="mode-toggle__knob"></span>
+                        <span class="mode-toggle__label" id="headlessModeLabel">VISIBLE</span>
+                    </button>
+                </div>
             </div>
         </div>
         <div class="log-panel">
@@ -68,6 +90,7 @@
             </div>
         </div>
     </div>
+
     <script src="../eel.js"></script>
     <script>
     async function handleBackNavigation(event) {

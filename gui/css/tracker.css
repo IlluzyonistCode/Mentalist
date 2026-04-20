@@ -2,39 +2,39 @@
     --men-red: #ff4444;
     --tal-gold: #ffed4e;
     --ist-bone: #d1c1c1;
-    
+
     --bg-void: #020101;
     --bg-cabinet: #0a0707;
     --bg-plate: #110d0d;
     --bg-tray: #1a1414;
-    
+
     --blood-dried: #4a0000;
     --blood-dark: #6b0000;
     --blood-arterial: #8b0000;
     --blood-bright: #cc0000;
-    
+
     --text-bright: #ffffff;
     --text-bone: #d1c1c1;
     --text-ash: #8c7a7a;
     --text-dirt: #5a4f4f;
-    
+
     --cli-green: #00ff88;
     --cli-yellow: #ffed4e;
     --cli-red: #ff4444;
     --cli-cyan: #00d4ff;
     --cli-purple: #b537f2;
     --cli-blue: #00d4ff;
-    
+
     --state-success: #00ff88;
     --state-warning: #ffed4e;
     --state-danger: #ff4444;
-    
+
     --shadow-deep: 0 40px 100px rgba(0, 0, 0, 0.9);
     --shadow-blood: 0 0 60px rgba(139, 0, 0, 0.4);
     --shadow-inset: inset 0 0 40px rgba(0, 0, 0, 0.95);
     --transition: 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
     --transition-fast: 0.2s ease-out;
-    
+
     --row-height: 48px;
 }
 
@@ -44,6 +44,20 @@ body {
     background: var(--bg-void);
     color: var(--text-bone);
     font-family: 'Cormorant Garamond', serif;
+}
+
+.tracker-layout {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.tracker-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .tracker-header {
@@ -57,6 +71,7 @@ body {
     backdrop-filter: blur(20px);
     position: relative;
     z-index: 100;
+    flex-shrink: 0;
 }
 
 .tracker-header h1 {
@@ -116,6 +131,12 @@ body {
     box-shadow: 0 0 15px rgba(255, 237, 78, 0.2);
 }
 
+.action-btn.analytics-toggle-active {
+    border-color: var(--cli-cyan);
+    color: var(--cli-cyan);
+    box-shadow: 0 0 12px rgba(0, 212, 255, 0.25);
+}
+
 .remaining-panel {
     background: rgba(8, 5, 5, 0.98);
     border-bottom: 2px solid var(--blood-dried);
@@ -126,6 +147,7 @@ body {
     backdrop-filter: blur(20px);
     position: relative;
     z-index: 90;
+    flex-shrink: 0;
 }
 
 .remaining-section {
@@ -172,6 +194,7 @@ body {
     position: relative;
     backdrop-filter: blur(20px);
     z-index: 90;
+    flex-shrink: 0;
 }
 
 #commandInput {
@@ -231,7 +254,7 @@ body {
     cursor: pointer;
 }
 
-.autocomplete-item:hover, 
+.autocomplete-item:hover,
 .autocomplete-item.selected {
     background: var(--blood-dark);
     color: var(--text-bright);
@@ -240,7 +263,7 @@ body {
 }
 
 .players-container {
-    height: calc(100vh - 230px);
+    flex: 1;
     overflow-y: auto;
     padding: 1rem 2rem;
     position: relative;
@@ -285,9 +308,9 @@ body {
     border-color: var(--tal-gold);
     border-left-color: var(--tal-gold);
     transform: translateX(6px);
-    box-shadow: 
-        var(--shadow-inset), 
-        10px 0 30px rgba(0,0,0,0.6),
+    box-shadow:
+        var(--shadow-inset),
+        10px 0 30px rgba(0, 0, 0, 0.6),
         0 0 20px rgba(255, 237, 78, 0.1);
     z-index: 10;
 }
@@ -305,6 +328,11 @@ body {
 .player-card.dead .player-name {
     text-decoration: line-through;
     color: var(--text-dirt);
+}
+
+.player-card.analytics-selected {
+    border-left-color: var(--cli-cyan) !important;
+    background: rgba(0, 50, 60, 0.25);
 }
 
 .player-identity {
@@ -362,21 +390,21 @@ body {
     border-radius: 50%;
 }
 
-.threat-low { 
-    border-color: rgba(0, 255, 136, 0.25); 
+.threat-low {
+    border-color: rgba(0, 255, 136, 0.25);
     color: var(--cli-green);
     background: rgba(0, 255, 136, 0.05);
 }
 
-.threat-medium { 
-    border-color: rgba(255, 237, 78, 0.25); 
+.threat-medium {
+    border-color: rgba(255, 237, 78, 0.25);
     color: var(--cli-yellow);
     background: rgba(255, 237, 78, 0.05);
 }
 
-.threat-high { 
-    border-color: var(--blood-arterial); 
-    color: var(--cli-red); 
+.threat-high {
+    border-color: var(--blood-arterial);
+    color: var(--cli-red);
     background: rgba(139, 0, 0, 0.1);
     box-shadow: 0 0 15px rgba(139, 0, 0, 0.3);
 }
@@ -416,33 +444,33 @@ body {
 }
 
 .player-aura.aura-good,
-.aura-good { 
-    color: var(--cli-green); 
-    text-shadow: 0 0 10px rgba(0, 255, 136, 0.4); 
+.aura-good {
+    color: var(--cli-green);
+    text-shadow: 0 0 10px rgba(0, 255, 136, 0.4);
 }
 
 .player-aura.aura-evil,
-.aura-evil { 
-    color: var(--cli-red); 
-    text-shadow: 0 0 10px rgba(255, 68, 68, 0.4); 
+.aura-evil {
+    color: var(--cli-red);
+    text-shadow: 0 0 10px rgba(255, 68, 68, 0.4);
 }
 
 .player-aura.aura-unknown,
-.aura-unknown { 
+.aura-unknown {
     color: var(--cli-cyan);
     opacity: 0.6;
 }
 
 .player-team.team-villager,
-.team-villager { 
-    color: var(--cli-green); 
-    opacity: 0.65; 
+.team-villager {
+    color: var(--cli-green);
+    opacity: 0.65;
 }
 
 .player-team.team-werewolf,
-.team-werewolf { 
-    color: var(--cli-red); 
-    opacity: 0.65; 
+.team-werewolf {
+    color: var(--cli-red);
+    opacity: 0.65;
 }
 
 .possible-roles {
@@ -479,6 +507,275 @@ body {
     justify-content: flex-end;
     gap: 1.2rem;
     font-weight: 600;
+}
+
+.analytics-sidebar {
+    width: 300px;
+    flex-shrink: 0;
+    background: rgba(6, 4, 4, 0.98);
+    border-left: 2px solid var(--blood-dried);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width var(--transition), opacity var(--transition);
+}
+
+.analytics-sidebar.collapsed {
+    width: 0;
+    border-left-width: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.analytics-header {
+    background: rgba(8, 5, 5, 0.98);
+    border-bottom: 2px solid var(--blood-dried);
+    padding: 0.9rem 1.4rem;
+    flex-shrink: 0;
+}
+
+.analytics-header-title {
+    font-family: 'Cinzel', serif;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--cli-cyan);
+    text-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+}
+
+.analytics-tabs {
+    display: flex;
+    border-bottom: 2px solid var(--blood-dried);
+    flex-shrink: 0;
+}
+
+.analytics-tab {
+    flex: 1;
+    padding: 0.5rem 0;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dirt);
+    font-family: 'Cinzel', serif;
+    font-size: 0.6rem;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    margin-bottom: -2px;
+}
+
+.analytics-tab:hover {
+    color: var(--text-ash);
+}
+
+.analytics-tab.active {
+    color: var(--cli-cyan);
+    border-bottom-color: var(--cli-cyan);
+}
+
+.analytics-body {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.analytics-body::-webkit-scrollbar {
+    width: 3px;
+}
+
+.analytics-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.analytics-body::-webkit-scrollbar-thumb {
+    background: var(--blood-dried);
+}
+
+.tab-pane {
+    display: none;
+    padding: 1rem 1.2rem;
+}
+
+.tab-pane.active {
+    display: block;
+}
+
+.bayes-player-row {
+    padding: 0.65rem 0;
+    border-bottom: 1px solid rgba(74, 0, 0, 0.3);
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.bayes-player-row:hover {
+    background: rgba(139, 0, 0, 0.06);
+    padding-left: 4px;
+}
+
+.bayes-player-row.selected {
+    background: rgba(0, 50, 60, 0.2);
+}
+
+.bayes-row-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 5px;
+}
+
+.bayes-slot {
+    font-family: 'Cinzel', serif;
+    font-size: 0.65rem;
+    color: var(--blood-arterial);
+    width: 16px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.bayes-name {
+    font-size: 0.85rem;
+    color: var(--text-bone);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 600;
+}
+
+.bayes-anom {
+    font-family: 'Cinzel', serif;
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.bayes-anom-low {
+    background: rgba(0, 255, 136, 0.08);
+    color: var(--cli-green);
+}
+
+.bayes-anom-mid {
+    background: rgba(255, 237, 78, 0.08);
+    color: var(--cli-yellow);
+}
+
+.bayes-anom-high {
+    background: rgba(255, 68, 68, 0.08);
+    color: var(--cli-red);
+}
+
+.team-prob-bar {
+    height: 5px;
+    border-radius: 2px;
+    overflow: hidden;
+    background: rgba(74, 0, 0, 0.3);
+    display: flex;
+    margin-bottom: 4px;
+}
+
+.team-prob-bar .seg-v {
+    background: var(--cli-green);
+}
+
+.team-prob-bar .seg-w {
+    background: var(--cli-red);
+}
+
+.team-prob-bar .seg-s {
+    background: var(--cli-purple);
+}
+
+.bayes-detail {
+    border-top: 1px solid var(--blood-dried);
+    padding: 1rem 1.2rem;
+    background: rgba(0, 0, 0, 0.3);
+    flex-shrink: 0;
+}
+
+.bayes-detail-title {
+    font-family: 'Cinzel', serif;
+    font-size: 0.65rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--tal-gold);
+    margin-bottom: 0.8rem;
+}
+
+.role-prob-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 4px;
+}
+
+.role-prob-name {
+    font-size: 0.8rem;
+    color: var(--text-ash);
+    width: 90px;
+    flex-shrink: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: 'Cormorant Garamond', serif;
+}
+
+.role-prob-bar-wrap {
+    flex: 1;
+    height: 6px;
+    background: rgba(74, 0, 0, 0.3);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.role-prob-bar-fill {
+    height: 100%;
+    background: var(--blood-arterial);
+    border-radius: 3px;
+    transition: width 0.5s cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+
+.role-prob-val {
+    font-family: 'Cinzel', serif;
+    font-size: 0.65rem;
+    color: var(--text-dirt);
+    width: 34px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.bayes-flags {
+    margin-top: 6px;
+    font-family: 'Cinzel', serif;
+    font-size: 0.6rem;
+    color: var(--cli-yellow);
+    letter-spacing: 0.5px;
+}
+
+.bayes-flag-item::before {
+    content: 'FLAG ';
+}
+
+.bayes-flag-item {
+    margin-bottom: 2px;
+}
+
+#mentionGraphSvg {
+    width: 100%;
+    display: block;
+}
+
+.graph-empty {
+    padding: 2rem 1rem;
+    text-align: center;
+    color: var(--text-dirt);
+    font-family: 'Cinzel', serif;
+    font-size: 0.7rem;
+    letter-spacing: 1.5px;
 }
 
 .modal {
@@ -662,9 +959,7 @@ body {
 .scenario-card:hover {
     border-color: var(--tal-gold);
     border-left-color: var(--tal-gold);
-    box-shadow: 
-        var(--shadow-inset),
-        0 0 30px rgba(255, 237, 78, 0.1);
+    box-shadow: var(--shadow-inset), 0 0 30px rgba(255, 237, 78, 0.1);
     transform: translateX(4px);
 }
 
@@ -704,19 +999,19 @@ body {
     border-left-color: var(--blood-arterial);
 }
 
-.action-actor { 
-    color: var(--cli-yellow); 
-    font-weight: 700; 
+.action-actor {
+    color: var(--cli-yellow);
+    font-weight: 700;
     font-family: 'Cinzel', serif;
 }
 
-.action-ability { 
-    color: var(--text-ash); 
+.action-ability {
+    color: var(--text-ash);
 }
 
-.action-target { 
-    color: var(--blood-bright); 
-    font-weight: 700; 
+.action-target {
+    color: var(--blood-bright);
+    font-weight: 700;
 }
 
 .players-container::-webkit-scrollbar {
@@ -729,7 +1024,6 @@ body {
 
 .players-container::-webkit-scrollbar-thumb {
     background: var(--blood-dried);
-    transition: var(--transition-fast);
 }
 
 .players-container::-webkit-scrollbar-thumb:hover {
@@ -756,7 +1050,66 @@ body {
 }
 
 @keyframes pulse-threat {
-    0% { box-shadow: 0 0 8px rgba(139, 0, 0, 0.3); }
-    50% { box-shadow: 0 0 20px rgba(139, 0, 0, 0.6); }
-    100% { box-shadow: 0 0 8px rgba(139, 0, 0, 0.3); }
+    0% {
+        box-shadow: 0 0 8px rgba(139, 0, 0, 0.3);
+    }
+
+    50% {
+        box-shadow: 0 0 20px rgba(139, 0, 0, 0.6);
+    }
+
+    100% {
+        box-shadow: 0 0 8px rgba(139, 0, 0, 0.3);
+    }
+}
+
+.bayes-anom-high {
+    animation: pulse-anom 3s infinite ease-in-out;
+}
+
+@keyframes pulse-anom {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+@media (max-width: 900px) {
+    .analytics-sidebar {
+        width: 240px;
+    }
+
+    .player-identity {
+        min-width: 180px;
+    }
+
+    .player-role-info {
+        min-width: 200px;
+    }
+
+    .possible-roles,
+    .player-stats {
+        display: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .analytics-sidebar {
+        position: fixed;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        z-index: 500;
+        width: 280px;
+        box-shadow: -10px 0 40px rgba(0, 0, 0, 0.8);
+    }
+
+    .analytics-sidebar.collapsed {
+        width: 0;
+    }
 }

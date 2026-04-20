@@ -13,13 +13,64 @@
 <body>
     <header class="spinner-header">
         <a href="#" class="back-button" id="backButton" onclick="handleBackNavigation(event)">← BACK</a>
-        <h1>SPINNER</h1>
+        <h1>SPINNER <span class="header-sub">MOBILE</span></h1>
         <div class="status-indicator" id="statusIndicator">
             <span class="status-dot"></span>
             <span class="status-text">INITIALIZING</span>
         </div>
     </header>
-    <div class="spinner-container">
+    <div class="spinner-container" id="wizardView">
+        <div class="wizard-panel">
+            <div class="wizard-header">
+                <div class="wizard-icon">📱</div>
+                <h2>ADB Device Setup</h2>
+                <p class="wizard-subtitle">Connect your Android device to begin</p>
+            </div>
+            <div class="wizard-steps" id="wizardSteps">
+                <div class="wizard-step" id="step-scan">
+                    <div class="step-status" id="scanStatus">
+                        <span class="step-dot pending"></span>
+                        <span>Scanning for ADB devices...</span>
+                    </div>
+                    <div class="step-result" id="scanResult"></div>
+                </div>
+            </div>
+            <div class="device-list" id="deviceList" style="display:none">
+                <h3>Select Device</h3>
+                <div class="device-items" id="deviceItems"></div>
+            </div>
+            <div class="wizard-manual" id="wizardManual" style="display:none">
+                <h3>Manual Connection</h3>
+                <div class="manual-form">
+                    <div class="form-row">
+                        <label>IP Address</label>
+                        <input type="text" id="deviceIp" placeholder="192.168.1.X" class="wizard-input">
+                    </div>
+                    <div class="form-row">
+                        <label>Port</label>
+                        <input type="text" id="devicePort" placeholder="5555" value="5555" class="wizard-input wizard-input-sm">
+                    </div>
+                    <button class="wizard-btn" onclick="connectManual()">CONNECT</button>
+                </div>
+                <div class="manual-hint">
+                    <p>Enable on your phone: <strong>Settings → Developer Options → Wireless Debugging</strong></p>
+                </div>
+            </div>
+            <div class="wizard-actions" id="wizardActions">
+                <button class="wizard-btn secondary" onclick="rescanDevices()">↻ RESCAN</button>
+                <button class="wizard-btn secondary" onclick="toggleManual()">✎ MANUAL IP</button>
+            </div>
+        </div>
+        <div class="log-panel wizard-log">
+            <div class="log-header">
+                <h2>ACTIVITY LOG</h2>
+                <button class="clear-log-btn" onclick="clearLog()">CLEAR</button>
+            </div>
+            <div class="log-content" id="logContent"></div>
+        </div>
+    </div>
+
+    <div class="spinner-container running-layout" id="runningView" style="display:none">
         <div class="stats-panel">
             <div class="stat-card">
                 <div class="stat-label">TOTAL SPINS</div>
@@ -40,10 +91,14 @@
         </div>
         <div class="state-panel">
             <h2>CURRENT STATE</h2>
-            <div class="state-content" id="stateContent">
+            <div class="state-content">
+                <div class="state-row">
+                    <span class="state-label">Device:</span>
+                    <span class="state-value" id="currentDevice">—</span>
+                </div>
                 <div class="state-row">
                     <span class="state-label">Phase:</span>
-                    <span class="state-value" id="currentPhase">Waiting for initialization...</span>
+                    <span class="state-value" id="currentPhase">Initializing...</span>
                 </div>
                 <div class="state-row">
                     <span class="state-label">Action:</span>
@@ -58,7 +113,7 @@
                     <span class="state-value" id="successRate">N/A</span>
                 </div>
             </div>
-            <div class="spinner-visual" id="spinnerVisual">
+            <div class="spinner-visual">
                 <div class="wheel-container">
                     <div class="wheel" id="wheelAnimation">
                         <div class="wheel-segment"></div>
@@ -78,14 +133,10 @@
                 <h2>ACTIVITY LOG</h2>
                 <button class="clear-log-btn" onclick="clearLog()">CLEAR</button>
             </div>
-            <div class="log-content" id="logContent">
-                <div class="log-entry log-info">
-                    <span class="log-time">[00:00:00]</span>
-                    <span class="log-message">Spinner initialized. Awaiting BlueStacks connection...</span>
-                </div>
-            </div>
+            <div class="log-content" id="logContentRunning"></div>
         </div>
     </div>
+
     <script src="../eel.js"></script>
     <script>
     async function handleBackNavigation(event) {
@@ -94,11 +145,7 @@
         const backButton = document.getElementById('backButton');
         const statusIndicator = document.getElementById('statusIndicator');
 
-        if (backButton.classList.contains('disabled')) {
-            console.log('Spinner: Navigation blocked - already stopping');
-
-            return;
-        }
+        if (backButton.classList.contains('disabled')) return;
 
         backButton.classList.add('disabled');
         backButton.textContent = '← STOPPING...';
@@ -109,31 +156,19 @@
         statusIndicator.className = 'status-indicator warning';
 
         try {
-            console.log('Spinner: Stopping module...');
-
-            const result = await eel.spinner_stop()();
-
-            console.log('Spinner: Stop result:', result);
-
+            await eel.spinner_stop()();
             await new Promise(resolve => setTimeout(resolve, 500));
 
-            console.log('Spinner: Redirecting to main menu...');
             window.location.href = '../index.html';
         } catch (error) {
-            console.error('Spinner: Navigation error:', error);
-
             setTimeout(() => window.location.href = '../index.html', 1000);
         }
     }
 
     window.addEventListener('beforeunload', async () => {
         try {
-            console.log('Spinner: Cleanup on page unload');
-
             await eel.spinner_stop()();
-        } catch (e) {
-            console.log('Spinner: Cleanup error:', e);
-        }
+        } catch (e) {}
     });
     </script>
     <script src="../js/spinner.js"></script>

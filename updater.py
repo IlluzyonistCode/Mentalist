@@ -24,13 +24,13 @@ class MentalistUpdater:
 		self.session = requests.Session()
 		self.session.headers.update({'X-API-Key': self.api_key})
 
-	def _get_exe_path(self):
+	def get_exe_path(self):
 		if getattr(sys, 'frozen', False):
 			return Path(sys.executable)
 
 		return Path(__file__).parent / f'mentalist_{self.build_type}_v{self.current_version}.exe'
 
-	def _calculate_checksum(self, filepath):
+	def calculate_checksum(self, filepath):
 		sha256 = hashlib.sha256()
 
 		with open(filepath, 'rb') as f:
@@ -64,7 +64,7 @@ class MentalistUpdater:
 						print(f'{Fore.YELLOW}  Current: {self.current_version}')
 						print(f'{Fore.GREEN}  Latest:  {update_info.get("version")}')
 						print(f'{Fore.CYAN}  Type:    {self.build_type.upper()}')
-						print(f'{Fore.CYAN}  Size:    {self._format_size(update_info.get("size", 0))}')
+						print(f'{Fore.CYAN}  Size:    {self.format_size(update_info.get("size", 0))}')
 
 						if update_info.get('changelog'):
 							print(f'\n{Fore.MAGENTA}Changelog:')
@@ -148,7 +148,7 @@ class MentalistUpdater:
 								filled = int(bar_length * downloaded / total_size)
 								bar = '█' * filled + '░' * (bar_length - filled)
 								
-								print(f"\r  {bar} {percent:.1f}% ({self._format_size(downloaded)}/{self._format_size(total_size)})", end='')
+								print(f"\r  {bar} {percent:.1f}% ({self.format_size(downloaded)}/{self.format_size(total_size)})", end='')
 
 			print()
 
@@ -157,7 +157,7 @@ class MentalistUpdater:
 			if expected_checksum:
 				print(f'{Style.BRIGHT}{Fore.CYAN}[UPDATER]{Fore.RESET} Verifying download integrity...')
 				
-				actual_checksum = self._calculate_checksum(temp_path)
+				actual_checksum = self.calculate_checksum(temp_path)
 
 				if actual_checksum.lower() != expected_checksum.lower():
 					print(f'{Style.BRIGHT}{Fore.RED}[UPDATER]{Fore.RESET} Checksum mismatch! Download corrupted.')
@@ -174,7 +174,7 @@ class MentalistUpdater:
 	   
 	def apply_update(self, update_file, new_version):
 		try:
-			current_exe = self._get_exe_path()
+			current_exe = self.get_exe_path()
 			backup_path = current_exe.with_suffix(current_exe.suffix + '.backup')
 			
 			print(f'\n{Style.BRIGHT}{Fore.CYAN}[UPDATER]{Fore.RESET} Applying {self.build_type.upper()} update...')
@@ -185,7 +185,7 @@ class MentalistUpdater:
 				shutil.copy2(current_exe, backup_path)
 
 			self.current_version = new_version
-			new_exe = self._get_exe_path()
+			new_exe = self.get_exe_path()
 			
 			print(f'{Fore.YELLOW}  Installing new version...')
 
@@ -216,7 +216,7 @@ class MentalistUpdater:
 
 	def restart_application(self):
 		try:
-			current_exe = self._get_exe_path()
+			current_exe = self.get_exe_path()
 
 			print(f'\n{Style.BRIGHT}{Fore.CYAN}[UPDATER]{Fore.RESET} Restarting application...')
 			
@@ -300,7 +300,7 @@ class MentalistUpdater:
 			input(f'\n{Fore.CYAN}Press Enter to continue...')
 
 	@staticmethod
-	def _format_size(bytes_size):
+	def format_size(bytes_size):
 		for unit in ['B', 'KB', 'MB', 'GB']:
 			if bytes_size < 1024.0:
 				return f"{bytes_size:.2f} {unit}"
@@ -326,7 +326,7 @@ class EelUpdater(MentalistUpdater):
 
 		self.build_type = 'gui'
 
-	def send_update(self, event_type, data):
+	def notify_gui(self, event_type, data):
 		if self.eel_available:
 			try:
 				self.eel.update_progress(event_type, data)
@@ -352,7 +352,7 @@ class EelUpdater(MentalistUpdater):
 
 	def download_update_gui(self, update_info):
 		try:
-			self.send_update('download_started', {
+			self.notify_gui('download_started', {
 				'version': update_info.get('version'),
 				'build_type': 'gui'}
 			)
@@ -360,7 +360,7 @@ class EelUpdater(MentalistUpdater):
 			def progress_callback(downloaded, total):
 				percent = (downloaded / total * 100) if total > 0 else 0
 
-				self.send_update('download_progress', {
+				self.notify_gui('download_progress', {
 					'percent': percent,
 					'downloaded': downloaded,
 					'total': total
@@ -369,7 +369,7 @@ class EelUpdater(MentalistUpdater):
 			downloaded_file = self.download_update(update_info, progress_callback)
 
 			if downloaded_file:
-				self.send_update('download_complete', {'file': str(downloaded_file)})
+				self.notify_gui('download_complete', {'file': str(downloaded_file)})
 
 				return {
 					'success': True,
@@ -377,14 +377,14 @@ class EelUpdater(MentalistUpdater):
 				}
 
 			else:
-				self.send_update('download_failed', {})
+				self.notify_gui('download_failed', {})
 
 				return {
 					'success': False,
 					'error': 'Download failed'
 				}
 		except Exception as e:
-			self.send_update('download_failed', {'error': str(e)})
+			self.notify_gui('download_failed', {'error': str(e)})
 
 			return {
 				'success': False,
@@ -393,20 +393,20 @@ class EelUpdater(MentalistUpdater):
 
 	def apply_update_gui(self, update_file_path, update_info):
 		try:
-			self.send_update('install_started', {})
+			self.notify_gui('install_started', {})
 
 			success = self.apply_update(Path(update_file_path), update_info.get('version'))
 
 			if success:
-				self.send_update('install_complete', {})
+				self.notify_gui('install_complete', {})
 
 				return {'success': True}
 
-			self.send_update('install_failed', {})
+			self.notify_gui('install_failed', {})
 
 			return {'success': False, 'error': 'Installation failed'}
 		except Exception as e:
-			self.send_update('install_failed', {'error': str(e)})
+			self.notify_gui('install_failed', {'error': str(e)})
 
 			return {
 				'success': False,

@@ -1,5 +1,5 @@
 const utils = {
-     async safeModuleExit(moduleName, options={}) {
+    async safeModuleExit(moduleName, options = {}) {
         const {
             backButtonId = 'backButton',
                 statusIndicatorId = 'statusIndicator',
@@ -43,13 +43,14 @@ const utils = {
                 const result = await eel[stopFunctionName]();
 
                 console.log(`${moduleName}: Stop result:`, result);
-            } else {
-                console.warn(`${moduleName}: Stop function not found`);
             }
+
+            else console.warn(`${moduleName}: Stop function not found`);
 
             await new Promise(resolve => setTimeout(resolve, stopDelay));
 
             console.log(`${moduleName}: Redirecting to main menu...`);
+
             window.location.href = redirectUrl;
         } catch (error) {
             console.error(`${moduleName}: Error during shutdown:`, error);
@@ -60,21 +61,6 @@ const utils = {
         }
     },
 
-    setupModuleCleanup(moduleName) {
-        window.addEventListener('beforeunload', async () => {
-            try {
-                const stopFunctionName = `${moduleName}_stop`;
-
-                if (typeof eel !== 'undefined' && eel[stopFunctionName]) {
-                    console.log(`${moduleName}: Cleanup on page unload`);
-
-                    await eel[stopFunctionName]();
-                }
-            } catch (e) {
-                console.log(`${moduleName}: Cleanup error:`, e);
-            }
-        });
-    },
 
     formatTime(timestamp) {
         if (!timestamp) return 'N/A';
@@ -130,6 +116,7 @@ const utils = {
 
         if (hours > 0) return `${hours}h ${minutes}m ${secs}s`;
         if (minutes > 0) return `${minutes}m ${secs}s`;
+
         return `${secs}s`;
     },
 
@@ -156,12 +143,14 @@ const utils = {
     getThreatColor(threat) {
         if (threat < 30) return '#00ff88';
         if (threat < 70) return '#ffed4e';
+
         return '#ff0055';
     },
 
     getThreatLevel(threat) {
         if (threat < 30) return 'low';
         if (threat < 70) return 'medium';
+
         return 'high';
     },
 
@@ -249,8 +238,10 @@ const utils = {
 
         setTimeout(() => {
             notification.style.animation = 'fadeOut 0.3s ease-out';
+
             setTimeout(() => {
                 notification.remove();
+
                 this.notificationQueue = this.notificationQueue.filter(n => n !== notification);
                 this.notificationQueue.forEach((n, i) => {
                     n.style.top = `${20 + (i * 80)}px`;
@@ -264,6 +255,7 @@ const utils = {
 
         if (modal) {
             modal.classList.add('active');
+
             document.body.style.overflow = 'hidden';
         }
     },
@@ -273,6 +265,7 @@ const utils = {
 
         if (modal) {
             modal.classList.remove('active');
+
             document.body.style.overflow = '';
         }
     },
@@ -294,6 +287,7 @@ const utils = {
             window.location.href = targetUrl;
         } catch (error) {
             console.error('Navigation error:', error);
+            
             window.location.href = targetUrl;
         }
     },
@@ -318,8 +312,8 @@ const utils = {
 
                     if (eel[stopFuncName]) await eel[stopFuncName]();
                 }
-            } catch (e) {
-                console.log('Cleanup error:', e);
+            } catch (error) {
+                console.log('Cleanup error:', error);
             }
         });
     },
@@ -331,17 +325,7 @@ const utils = {
             'background: #8b0000; color: #fff; font-weight: bold;');
     },
 
-    saveToLocalStorage: (key, value) => {
-        try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (e) { return false; }
-    },
 
-    loadFromLocalStorage: (key, defaultValue = null) => {
-        try {
-            const item = localStorage.getItem(key);
-
-            return item ? JSON.parse(item) : defaultValue;
-        } catch (e) { return defaultValue; }
-    },
 
     async copyToClipboard(text) {
         try {
@@ -373,6 +357,7 @@ const utils = {
         return function(...args) {
             if (!inThrottle) {
                 func.apply(this, args);
+
                 inThrottle = true;
 
                 setTimeout(() => inThrottle = false, limit);

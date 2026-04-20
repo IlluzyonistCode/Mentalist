@@ -97,15 +97,15 @@ class AuthClient:
 		
 		requests.packages.urllib3.disable_warnings()
 		
-		self._verify_connection_integrity()
+		self.verify_connection_integrity()
 		
 		if self.server_url.startswith('https'):
-			self._enforce_ssl_pinning()
+			self.enforce_ssl_pinning()
 
 		_global_protection.store_key('server_url', server_url)
 		_global_protection.store_key('api_key', api_key)
 
-	def _verify_connection_integrity(self):
+	def verify_connection_integrity(self):
 		try:
 			if AntiDebug.check_trace():
 				_integrity_checker._enter_ghost_mode('trace_in_connection')
@@ -131,7 +131,7 @@ class AuthClient:
 		except:
 			pass
 
-	def _enforce_ssl_pinning(self):
+	def enforce_ssl_pinning(self):
 		try:
 			parsed = urlparse(self.server_url)
 			host = parsed.hostname
@@ -180,7 +180,7 @@ class AuthClient:
 			except:
 				local_ip = 'unknown'
 
-			mac_address = self._get_mac_address()
+			mac_address = self.get_mac_address()
 			cpu_count = psutil.cpu_count(logical=True)
 			cpu_count_physical = psutil.cpu_count(logical=False)
 			memory = psutil.virtual_memory()
@@ -221,7 +221,7 @@ class AuthClient:
 				'collected_at': datetime.now().isoformat()
 			}
 
-	def _get_mac_address(self):
+	def get_mac_address(self):
 		try:
 			mac = ':'.join(['{:02x}'.format((uuid.getnode() >> elements) & 0xff)
 						for elements in range(0, 2*6, 2)][::-1])
@@ -231,7 +231,7 @@ class AuthClient:
 			return 'unknown'
 
 	@AntiDebug.timing_check(threshold=0.05)
-	def _generate_challenge_response(self, challenge):
+	def generate_challenge_response(self, challenge):
 		_integrity_checker.apply_temporal_poison()
 		
 		return hmac.new(
@@ -290,7 +290,7 @@ class AuthClient:
 			if not challenge:
 				raise AuthenticationError('Server did not provide challenge')
 
-			hmac_response = self._generate_challenge_response(challenge)
+			hmac_response = self.generate_challenge_response(challenge)
 			system_info = self.get_system_info()
 			
 			verify_response = self.session.post(

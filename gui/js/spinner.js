@@ -1,6 +1,8 @@
-let isInitialized = false;
-
 let spinnerStartTime = null;
+let isRunning = false;
+let manualVisible = false;
+let pollInterval = null;
+
 let spinnerStats = {
     totalSpins: 0,
     successfulSpins: 0,
@@ -8,146 +10,180 @@ let spinnerStats = {
 };
 
 let currentState = {
-    phase: 'Waiting for initialization...',
+    phase: 'Initializing...',
     action: 'Idle',
     lastSpin: 'Never',
-    successRate: 'N/A'
+    device: '—'
 };
 
-let updateInterval = null;
-let isSpinning = false;
-let processingLogs = false;
+document.addEventListener('DOMContentLoaded', () => {
+    addLog('info', 'Scanning for ADB devices...');
+    setStatus('initializing', 'SCANNING');
 
-document.addEventListener('DOMContentLoaded', async () => {
-    console.log('%c Mentalist Spinner Initialized ', 'background: #ffed4e; color: #000; font-weight: bold;');
+    runAutoSetup();
+});
 
-    addLog('info', 'Initializing Spinner module...');
+async function runAutoSetup() {
+    setScanStatus('loading', 'Starting ADB server and scanning...');
 
     try {
-        const result = await eel.spinner_start()();
+        const result = await eel.spinner_adb_scan()();
+
+        if (result.serial) {
+            setScanStatus('success', `Found device: ${result.serial}`);
+            addLog('success', `Auto-connected: ${result.serial}`);
+
+            startSpinner(result.serial);
+        } else if (result.devices && result.devices.length > 0) {
+            setScanStatus('success', `Found ${result.devices.length} device(s)`);
+            showDeviceList(result.devices);
+        } else {
+            setScanStatus('error', 'No devices found');
+            addLog('warning', 'No ADB devices found. Connect your phone or enter IP manually.');
+
+            showManual();
+        }
+    } catch (error) {
+        setScanStatus('error', 'Scan failed');
+        addLog('error', `Scan error: ${error.message || error}`);
+    }
+}
+
+async function rescanDevices() {
+    document.getElementById('deviceList').style.display = 'none';
+
+    addLog('info', 'Rescanning...');
+    setScanStatus('loading', 'Rescanning...');
+
+    runAutoSetup();
+}
+
+function toggleManual() {
+    manualVisible = !manualVisible;
+
+    document.getElementById('wizardManual').style.display = manualVisible ? 'block' : 'none';
+}
+
+function showManual() {
+    manualVisible = true;
+
+    document.getElementById('wizardManual').style.display = 'block';
+}
+
+async function connectManual() {
+    const ip = document.getElementById('deviceIp').value.trim();
+    const portRaw = document.getElementById('devicePort').value.trim();
+    const port = portRaw || '5555';
+
+    if (!ip) {
+        addLog('error', 'Enter an IP address.');
+
+        return;
+    }
+
+    addLog('info', `Connecting to ${ip}:${port}...`);
+
+    try {
+        const result = await eel.spinner_adb_connect(ip, port)();
 
         if (result.success) {
-            addLog('success', 'Spinner started successfully!');
+            addLog('success', `Connected: ${ip}:${port}`);
 
-            spinnerStartTime = Date.now();
+            startSpinner(`${ip}:${port}`);
+        }
 
-            setInterval(updateUptime, 1000);
+        else addLog('error', `Connection failed: ${result.error}`);
+    } catch (error) {
+        addLog('error', `Connection error: ${e.message || error}`);
+    }
+}
 
-            updateInterval = setInterval(pollSpinnerState, 2000);
-            
-            setInterval(async () => {
-                if (processingLogs) {
-                    console.log('[SPINNER] Skipping poll - already processing');
+function showDeviceList(devices) {
+    const list = document.getElementById('deviceList');
+    const items = document.getElementById('deviceItems');
 
-                    return;
-                }
-                
-                try {
-                    processingLogs = true;
+    items.innerHTML = '';
 
-                    const data = await eel.get_spinner_data()();
-                    
-                    if (!data) return;
+    devices.forEach(dev => {
+        const item = document.createElement('div');
+        item.className = 'device-item';
+        item.onclick = () => selectDevice(dev.serial);
 
-                    if (data.states && data.states.length > 0) {
-                        const latestState = data.states[data.states.length - 1];
-                        
-                        if (latestState.initialized && !isInitialized) {
-                            isInitialized = true;
+        const badge = dev.transport === 'wifi'
+            ? '<span class="device-badge wifi">WiFi</span>'
+            : '<span class="device-badge usb">USB</span>';
 
-                            setStatus('running', 'RUNNING');
-                            addLog('success', '✓ Emulator initialized - ready to spin');
-                        }
-                        
-                        if (latestState.phase) updateState('phase', latestState.phase);
-                        if (latestState.action) updateState('action', latestState.action);
-                        if (latestState.lastSpin) updateState('lastSpin', latestState.lastSpin);
-                        if (latestState.stats) {
-                            Object.assign(spinnerStats, latestState.stats);
-                            
-                            updateStats();
-                        }
-                    }
+        item.innerHTML = `
+            <div>
+                <div class="device-serial">${dev.serial}</div>
+                <div class="device-meta">${dev.model || dev.product || 'Unknown model'}</div>
+            </div>
+            ${badge}
+        `;
 
-                    if (data.logs && data.logs.length > 0) addLogsBatch(data.logs);
-                } catch (e) {
-                    console.error('[SPINNER] Polling error:', e);
-                } finally {
-                    processingLogs = false;
-                }
-            }, 1000);
+        items.appendChild(item);
+    });
+
+    list.style.display = 'block';
+}
+
+function selectDevice(serial) {
+    addLog('info', `Selected device: ${serial}`);
+
+    startSpinner(serial);
+}
+
+async function startSpinner(serial) {
+    addLog('info', `Starting Spinner on ${serial}...`);
+    setStatus('initializing', 'CONNECTING');
+
+    try {
+        const result = await eel.spinner_start_mobile(serial)();
+
+        if (result.success) {
+            currentState.device = serial;
+
+            transitionToRunning(serial);
         } else {
-            addLog('error', `Failed to start Spinner: ${result.error || 'Unknown error'}`);
+            addLog('error', `Failed to start: ${result.error}`);
             setStatus('error', 'ERROR');
         }
     } catch (error) {
-        console.error('Spinner initialization error:', error);
-        addLog('error', 'Critical error during initialization');
-        setStatus('error', 'FAILED');
+        addLog('error', `Start error: ${error.message || error}`);
+        setStatus('error', 'ERROR');
     }
-});
+}
 
-window.addEventListener('beforeunload', () => {
-    if (updateInterval) clearInterval(updateInterval);
-});
+function transitionToRunning(serial) {
+    document.getElementById('wizardView').style.display = 'none';
+    document.getElementById('runningView').style.display = 'grid';
+    document.getElementById('currentDevice').textContent = serial;
 
-async function pollSpinnerState() {
+    isRunning = true;
+    spinnerStartTime = performance.now();
+
+    setInterval(updateUptime, 1000);
+
+    setStatus('running', 'RUNNING');
+    addLogRunning('success', `Spinner started on ${serial}`);
+
+    pollInterval = setInterval(pollLogs, 1500);
+}
+
+async function pollLogs() {
     try {
-        updateStateDisplay();
+        const data = await eel.get_spinner_data()();
+
+        if (!data) return;
+
+        if (data.logs && data.logs.length > 0)
+            data.logs.forEach(log => {
+                addLogRunning(log.type, log.message);
+                parseLogForState(log.message);
+            });
     } catch (error) {
-        console.error('State polling error:', error);
+        console.error('Poll error:', error);
     }
-}
-
-function setStatus(level, text) {
-    const indicator = document.getElementById('statusIndicator');
-    const statusText = indicator.querySelector('.status-text');
-
-    indicator.className = 'status-indicator ' + level;
-    statusText.textContent = text;
-}
-
-function addLogsBatch(logs) {
-    if (!logs || logs.length === 0) return;
-    
-    const logContent = document.getElementById('logContent');
-    const fragment = document.createDocumentFragment();
-    
-    logs.forEach(log => {
-        const entry = document.createElement('div');
-        entry.className = `log-entry log-${log.type}`;
-        
-        const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-        
-        entry.innerHTML = `
-            <span class="log-time">[${time}]</span>
-            <span class="log-message">${log.message}</span>
-        `;
-        
-        fragment.appendChild(entry);
-
-        parseLogForState(log.message);
-    });
-    
-    logContent.appendChild(fragment);
-    logContent.scrollTop = logContent.scrollHeight;
-}
-
-function addLog(type, message) {
-    const logContent = document.getElementById('logContent');
-
-    const entry = document.createElement('div');
-    entry.className = `log-entry log-${type}`;
-
-    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-
-    entry.innerHTML = `
-        <span class="log-time">[${time}]</span>
-        <span class="log-message">${message}</span>
-    `;
-
-    logContent.appendChild(entry);
-    logContent.scrollTop = logContent.scrollHeight;
 }
 
 function parseLogForState(message) {
@@ -155,44 +191,27 @@ function parseLogForState(message) {
     const wheel = document.getElementById('wheelAnimation');
     const spinStatus = document.getElementById('spinStatus');
 
-    if (msg.includes('waiting for bluestacks')) {
-        updateState('phase', 'Waiting for BlueStacks');
-        updateState('action', 'Launching emulator');
-    } else if (msg.includes('opening bluestacks') || msg.includes('bluestacks ready')) {
-        updateState('phase', 'BlueStacks active');
-        updateState('action', 'Loading game');
-    } else if (msg.includes('waiting for the game')) {
+    if (msg.includes('launching game')) {
+        updateState('phase', 'Starting game');
+        updateState('action', 'Launching app');
+    } else if (msg.includes('waiting for main menu')) {
         updateState('phase', 'Loading game');
-        updateState('action', 'Waiting for profile');
-    } else if (msg.includes('game loaded')) {
-        updateState('phase', 'Game ready');
-        updateState('action', 'Navigating to wheel');
+        updateState('action', 'Waiting for menu');
+    } else if (msg.includes('opening gold wheel')) {
+        updateState('phase', 'Navigating');
+        updateState('action', 'Opening reward wheel');
     } else if (msg.includes('checking ad button')) {
         updateState('phase', 'Checking rewards');
-        updateState('action', 'Scanning for ad button');
-    } else if (msg.includes('done!')) {
-        updateState('phase', 'All spins complete');
-        updateState('action', 'Session finished');
-        setStatus('complete', 'COMPLETE');
-        if (spinStatus) {
-            spinStatus.textContent = 'COMPLETE!';
-            spinStatus.className = 'spin-status success';
-        }
-
-        if (wheel) wheel.classList.remove('spinning');
+        updateState('action', 'Scanning screen');
+    } else if (msg.includes('clicking ad button')) {
+        updateState('phase', 'Starting ad');
+        updateState('action', 'Clicking watch button');
     } else if (msg.includes('watching ad')) {
         updateState('phase', 'Watching advertisement');
-        updateState('action', 'Ad in progress (120s)');
-
-        let countdown = 120;
-
-        const countdownInterval = setInterval(() => {
-            countdown--;
-
-            updateState('action', `Ad in progress (${countdown}s)`);
-
-            if (countdown <= 0) clearInterval(countdownInterval);
-        }, 1000);
+        updateState('action', 'Ad in progress');
+    } else if (msg.includes('closing ad')) {
+        updateState('phase', 'Closing ad');
+        updateState('action', 'Pressing back');
     } else if (msg.includes('checking spin button')) {
         updateState('phase', 'Ready to spin');
         updateState('action', 'Locating spin button');
@@ -203,9 +222,15 @@ function parseLogForState(message) {
         if (wheel) wheel.classList.add('spinning');
 
         if (spinStatus) {
-            spinStatus.textContent = 'SPINNING!';
+            spinStatus.textContent = 'SPINNING!'
             spinStatus.className = 'spin-status spinning';
         }
+
+        spinnerStats.totalSpins++;
+        spinnerStats.successfulSpins++;
+
+        updateStats();
+        updateState('lastSpin', new Date().toLocaleTimeString());
 
         setTimeout(() => {
             if (wheel) wheel.classList.remove('spinning');
@@ -222,96 +247,148 @@ function parseLogForState(message) {
                 }
             }, 2000);
         }, 3000);
+    } else if (msg.includes('done!')) {
+        updateState('phase', 'All spins complete');
+        updateState('action', 'Session finished');
+        setStatus('complete', 'COMPLETE');
 
-        spinnerStats.totalSpins++;
-        spinnerStats.successfulSpins++;
+        if (spinStatus) {
+            spinStatus.textContent = 'COMPLETE!';
+            spinStatus.className = 'spin-status success';
+        }
 
-        updateStats();
-        updateState('lastSpin', new Date().toLocaleTimeString());
-    } else if (msg.includes('loading takes too long') || msg.includes('failed')) {
-        updateState('phase', 'Error detected');
+        if (wheel) wheel.classList.remove('spinning');
+
+        if (pollInterval) clearInterval(pollInterval);
+    } else if (msg.includes('loading takes too long') || msg.includes('could not close ad') || msg.includes('spin button not found')) {
+        updateState('phase', 'Error');
         updateState('action', 'Retrying...');
 
         spinnerStats.failedSpins++;
-        updateStats();
-    } else if (msg.includes('restarting')) {
-        updateState('phase', 'Restarting');
-        updateState('action', 'Closing game');
-    }
-}
 
-function updateState(key, value) {
-    if (currentState[key] === value) return;
-    
-    currentState[key] = value;
+        updateStats();
+    } else if (msg.includes('restarting game')) {
+        updateState('phase', 'Restarting');
+        updateState('action', 'Force-stopping app');
+    } else if (msg.includes('rejoin popup')) {
+        updateState('action', 'Dismissing popup');
+    }
 
     updateStateDisplay();
 }
 
+function setScanStatus(state, text) {
+    const dot = document.querySelector('#step-scan .step-dot');
+    const span = document.querySelector('#step-scan .step-status span:last-child');
+
+    if (dot) { dot.className = `step-dot ${state}`; }
+
+    if (span) span.textContent = text;
+}
+
+function setStatus(level, text) {
+    const indicator = document.getElementById('statusIndicator');
+    indicator.className = 'status-indicator ' + level;
+    indicator.querySelector('.status-text').textContent = text;
+}
+
+function updateState(key, value) {
+    if (currentState[key] === value) return;
+
+    currentState[key] = value;
+}
+
 function updateStateDisplay() {
-    document.getElementById('currentPhase').textContent = currentState.phase;
+    const phase  = document.getElementById('currentPhase');
+    const action = document.getElementById('currentAction');
 
-    const actionEl = document.getElementById('currentAction');
-    actionEl.textContent = currentState.action;
+    if (phase)  phase.textContent  = currentState.phase;
 
-    if (currentState.action !== 'Idle' && currentState.action !== 'Waiting') actionEl.classList.add('active');
-    else actionEl.classList.remove('active');
+    if (action) {
+        action.textContent = currentState.action;
+        action.classList.toggle('active', currentState.action !== 'Idle');
+    }
 
-    document.getElementById('lastSpin').textContent = currentState.lastSpin;
+    const lastSpin = document.getElementById('lastSpin');
+
+    if (lastSpin) lastSpin.textContent = currentState.lastSpin;
 
     if (spinnerStats.totalSpins > 0) {
         const rate = Math.round((spinnerStats.successfulSpins / spinnerStats.totalSpins) * 100);
-        document.getElementById('successRate').textContent = `${rate}%`;
-        currentState.successRate = `${rate}%`;
+        const el = document.getElementById('successRate');
+
+        if (el) el.textContent = `${rate}%`;
     }
 }
 
 function updateStats() {
-    document.getElementById('totalSpins').textContent = spinnerStats.totalSpins;
-    document.getElementById('successfulSpins').textContent = spinnerStats.successfulSpins;
-    document.getElementById('failedSpins').textContent = spinnerStats.failedSpins;
+    const t = document.getElementById('totalSpins');
+    const s = document.getElementById('successfulSpins');
+    const f = document.getElementById('failedSpins');
+
+    if (t) t.textContent = spinnerStats.totalSpins;
+
+    if (s) s.textContent = spinnerStats.successfulSpins;
+
+    if (f) f.textContent = spinnerStats.failedSpins;
 }
 
 function updateUptime() {
     if (!spinnerStartTime) return;
 
-    const elapsed = Math.floor((Date.now() - spinnerStartTime) / 1000);
-    const hours = Math.floor(elapsed / 3600).toString().padStart(2, '0');
-    const minutes = Math.floor((elapsed % 3600) / 60).toString().padStart(2, '0');
-    const seconds = (elapsed % 60).toString().padStart(2, '0');
+    const elapsed = Math.floor((performance.now() - spinnerStartTime) / 1000);
+    const h = Math.floor(elapsed / 3600).toString().padStart(2, '0');
+    const m = Math.floor((elapsed % 3600) / 60).toString().padStart(2, '0');
+    const s = (elapsed % 60).toString().padStart(2, '0');
+    const el = document.getElementById('uptime');
 
-    document.getElementById('uptime').textContent = `${hours}:${minutes}:${seconds}`;
+    if (el) el.textContent = `${h}:${m}:${s}`;
+}
+
+function addLog(type, message) {
+    _appendLog('logContent', type, message);
+}
+
+function addLogRunning(type, message) {
+    _appendLog('logContentRunning', type, message);
+}
+
+function _appendLog(containerId, type, message) {
+    const container = document.getElementById(containerId);
+
+    if (!container) return;
+
+    const entry = document.createElement('div');
+    entry.className = `log-entry log-${type}`;
+
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    entry.innerHTML = `<span class="log-time">[${time}]</span><span class="log-message">${message}</span>`;
+
+    container.appendChild(entry);
+    container.scrollTop = container.scrollHeight;
 }
 
 function clearLog() {
-    const logContent = document.getElementById('logContent');
-    logContent.innerHTML = '';
+    const running = document.getElementById('logContentRunning');
+    const wizard  = document.getElementById('logContent');
 
-    addLog('info', 'Log cleared');
+    if (running && running.closest('#runningView').style.display !== 'none') {
+        running.innerHTML = '';
+
+        addLogRunning('info', 'Log cleared');
+    } else {
+        if (wizard) wizard.innerHTML = '';
+
+        addLog('info', 'Log cleared');
+    }
 }
 
 eel.expose(spinner_log_update);
 
 function spinner_log_update(type, message) {
-    addLog(type, message);
-}
+    if (isRunning) addLogRunning(type, message);
 
-eel.expose(spinner_state_update);
-
-function spinner_state_update(stateData) {
-    if (stateData.initialized && !isInitialized) {
-        isInitialized = true;
-
-        setStatus('running', 'RUNNING');
-        addLog('success', '✓ Emulator initialized - ready to spin');
-    }
-
-    if (stateData.phase) updateState('phase', stateData.phase);
-    if (stateData.action) updateState('action', stateData.action);
-    if (stateData.lastSpin) updateState('lastSpin', stateData.lastSpin);
-    if (stateData.stats) {
-        Object.assign(spinnerStats, stateData.stats);
-
-        updateStats();
-    }
+    else addLog(type, message);
+    
+    parseLogForState(message);
 }

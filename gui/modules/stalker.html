@@ -52,6 +52,7 @@
             <div class="modal-body" id="targetModalBody"></div>
         </div>
     </div>
+
     <script src="../eel.js"></script>
     <script src="../js/utils.js"></script>
     <script>
@@ -81,6 +82,7 @@
             await new Promise(resolve => setTimeout(resolve, 300));
 
             console.log('Stalker: Redirecting to main menu...');
+            
             window.location.href = '../index.html';
         } catch (error) {
             console.error('Stalker: Navigation error:', error);
@@ -98,7 +100,6 @@
             console.log('Stalker: Cleanup error:', e);
         }
     });
-
     </script>
     <script src="../js/stalker.js"></script>
 </body>

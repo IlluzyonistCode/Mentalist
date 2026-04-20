@@ -11,7 +11,7 @@ init(autoreset=True)
 _auth_session_cache = None
 
 
-def _perform_runtime_check():
+def perform_runtime_check():
 	if WindowsAntiDebug.check_all():
 		_integrity_checker._enter_ghost_mode('runtime_debug_detected')
 		_integrity_checker.apply_temporal_poison()
@@ -44,7 +44,7 @@ def require_module_auth(module_name):
 		def wrapper(self, *args, **kwargs):
 			global _auth_session_cache
 			
-			if not _perform_runtime_check():
+			if not perform_runtime_check():
 				corruption_handler = _integrity_checker.get_corruption_handler()
 				
 				if corruption_handler.is_phantom_mode():

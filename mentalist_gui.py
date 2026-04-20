@@ -1,30 +1,60 @@
+import os
+import sys
+import warnings
+
+warnings.filterwarnings('ignore', category=Warning, module='gevent')
+
 from gevent import monkey
 
-monkey.patch_socket()
-monkey.patch_ssl()
+if sys.platform != 'darwin':
+    monkey.patch_all(subprocess=False)
+
+import eel
+import requests
+import threading
+import queue
+
+import time
+import logging
+import traceback
+import tkinter as tk
+
+if getattr(sys, 'frozen', False):
+    base_path = sys._MEIPASS
+
+    ms_playwright_path = os.path.join(base_path, 'ms-playwright')
+
+    if os.path.exists(ms_playwright_path):
+        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = ms_playwright_path
+
+    for node_path in [
+        os.path.join(base_path, 'playwright', 'driver', 'node.exe'),
+        os.path.join(base_path, 'ms-playwright', 'node.exe'),
+        os.path.join(base_path, 'node', 'node.exe'),
+    ]:
+        if os.path.exists(node_path):
+            os.environ['PLAYWRIGHT_NODEJS_PATH'] = node_path
+
+            break
 
 try:
 	import pyi_splash
 except ImportError:
 	pyi_splash = None
 
-import asyncio
-import eel
-import requests
-import threading
-import queue
-import os
-import sys
-import re
-import time
-import logging
-import traceback
-import tkinter as tk
 from colorama import Fore, Style, init
 from dotenv import dotenv_values
-from mentalist import Tracker, Stalker, Booster, Spinner, set_launch_mode
+from utils import set_launch_mode, check_updates_on_startup, banner
 from translations import is_game_phase
 from updater import EelUpdater
+from tracker import Tracker
+from booster import Booster
+from stalker import Stalker
+
+from spinner import SpinnerMobile
+
+if os.name == 'nt':
+    from spinner import SpinnerDesktop
 
 set_launch_mode('GUI')
 
@@ -35,20 +65,18 @@ except:
 	pass
 
 logging.getLogger('eel').setLevel(logging.ERROR)
-logging.basicConfig(level=logging.ERROR)
+logging.getLogger('asyncio').setLevel(logging.CRITICAL)
 logging.basicConfig(
 	level=logging.INFO,
 	format='%(asctime)s [%(threadName)s] %(message)s',
 	handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-logging.getLogger('asyncio').setLevel(logging.CRITICAL)
-
 init(autoreset=True)
 
 eel.init('gui')
 
-VERSION = '1.0.3'
+VERSION = '1.0.4'
 updater_instance = None
 
 locks = {
@@ -95,6 +123,32 @@ pending_states = {
 
 logs_lock = threading.Lock()
 
+_booster_stats_session = {
+	'gamesPlayed': 0,
+	'villagerGames': 0,
+	'werewolfGames': 0,
+	'soloGames': 0
+}
+
+
+def _start_watchdog(module_name, thread):
+	def _watch():
+		while True:
+			time.sleep(5)
+
+			if not active_modules.get(module_name):
+				break
+
+			if not thread.is_alive():
+				logging.warning(f'{module_name} watchdog: thread is dead')
+
+				with logs_lock:
+					pending_states[module_name].append({'initialized': False, 'phase': 'Crashed', 'action': 'Idle'})
+
+				break
+
+	threading.Thread(target=_watch, name=f'{module_name.capitalize()}Watchdog', daemon=True).start()
+
 
 class ModuleWrapper:
 	def __init__(self, module_instance, module_name):
@@ -127,6 +181,9 @@ class ModuleWrapper:
 			
 			with logs_lock:
 				pending_logs[module_name].append(log_entry)
+
+				if len(pending_logs[module_name]) > 500:
+					pending_logs[module_name] = pending_logs[module_name][-500:]
 		
 		module_instance.log_message = new_log_message
 
@@ -142,9 +199,28 @@ class ModuleWrapper:
 				}
 				
 				with logs_lock:
-					pending_states[module_name].append(state_entry)
+					last = pending_states[module_name][-1] if pending_states[module_name] else None
+
+					if last and 'phase' in last and 'stats' not in last and 'initialized' not in last:
+						pending_states[module_name][-1] = state_entry
+					
+					else:
+						pending_states[module_name].append(state_entry)
 			
 			module_instance.log_state = new_log_state
+
+		if hasattr(module_instance, 'push_stats'):
+			def new_push_stats(stats_dict):
+				with logs_lock:
+					last = pending_states[module_name][-1] if pending_states[module_name] else None
+
+					if last and 'stats' in last and 'initialized' not in last:
+						pending_states[module_name][-1] = {'stats': stats_dict}
+					
+					else:
+						pending_states[module_name].append({'stats': stats_dict})
+
+			module_instance.push_stats = new_push_stats
 		
 	def safe_close_browser(self):
 		try:
@@ -228,11 +304,10 @@ def get_modules_status():
 		logging.debug(f'Booster unavailable: {e}')
 	
 	try:
-		if os.name == 'nt':
-			spinner = Spinner()
+		spinner = SpinnerMobile()
 
-			if hasattr(spinner, 'is_valid') and spinner.is_valid:
-				status['modules']['spinner'] = True
+		if hasattr(spinner, 'is_valid') and spinner.is_valid:
+			status['modules']['spinner'] = True
 	except Exception as e:
 		logging.debug(f'Spinner unavailable: {e}')
 
@@ -316,7 +391,7 @@ def tracker_start():
 							update_status('starting', 'Timeout navigating to Wolvesville, retrying...')
 
 							continue
-						except Exception as e:
+						except:
 							update_status('starting', f'Navigation error, retrying...')
 
 							time.sleep(3)
@@ -411,7 +486,9 @@ def tracker_start():
 							if players_grid_xpath is None:
 								logging.warning('Player grid not found, waiting for next game...')
 								update_status('waiting_for_game', 'Player grid not found. Waiting for next game...')
+
 								time.sleep(3)
+
 								continue
 
 							tracker.find_players(players_grid_xpath)
@@ -435,7 +512,6 @@ def tracker_start():
 									wrapper.end_requested = False
 									wrapper.game_ended = True
 
-									# Reset tracker state for next game
 									tracker.PLAYERS = []
 									tracker.PLAYER_LAYERS = []
 									tracker.PLAYER_CARDS = {}
@@ -479,6 +555,9 @@ def tracker_start():
 				except:
 					pass
 			finally:
+				with logs_lock:
+					pending_states['tracker'].append({'initialized': False, 'phase': 'Stopped', 'action': 'Idle'})
+
 				wrapper.safe_close_browser()
 
 				with locks['tracker']:
@@ -489,6 +568,8 @@ def tracker_start():
 		thread = threading.Thread(target=run_tracker_logic, name='TrackerThread', daemon=True)
 		module_threads['tracker'] = thread
 		thread.start()
+
+		_start_watchdog('tracker', thread)
 
 		return {'success': True}
 	except Exception as e:
@@ -506,7 +587,9 @@ def tracker_get_state():
 		'rotation': [],
 		'threat_levels': {},
 		'player_alliances': {},
-		'player_claims': {}
+		'player_claims': {},
+		'bayes': {},
+		'nlp': {}
 	}
 
 	if not tracker_wrapper:
@@ -529,6 +612,8 @@ def tracker_get_state():
 				response['player_alliances'] = getattr(tracker, 'PLAYER_ALLIANCES', {})
 				response['threat_levels'] = getattr(tracker, 'THREAT_LEVELS', {})
 				response['player_claims'] = getattr(tracker, 'PLAYER_CLAIMS', {})
+				response['bayes'] = tracker.bayes.serialise_for_frontend() if hasattr(tracker, 'bayes') else {}
+				response['nlp'] = tracker.nlp.serialise_for_frontend() if hasattr(tracker, 'nlp') else {}
 
 				has_rotation = hasattr(tracker, 'ROTATION') and tracker.ROTATION
 				remaining = {'GOOD': [], 'EVIL': [], 'UNKNOWN': []}
@@ -556,7 +641,8 @@ def tracker_get_state():
 				if 'players' in response and response['players']:
 					for i, p_data in enumerate(response['players']):
 						try:
-							if i >= len(tracker.PLAYERS): break
+							if i >= len(tracker.PLAYERS):
+								break
 							
 							player_obj = tracker.PLAYERS[i]
 							name = p_data['name']
@@ -602,15 +688,19 @@ def tracker_get_state():
 								flatten_cards = []
 
 								for c in cards_dict.values():
-									if isinstance(c, list): flatten_cards.extend(c)
-									else: flatten_cards.append(c)
+									if isinstance(c, list): 
+										flatten_cards.extend(c)
+
+									else:
+										flatten_cards.append(c)
 
 								icons = getattr(tracker, 'PLAYER_ICONS', {}).get(name, {})
 								team = player_obj.get('team')
 								aura = player_obj.get('aura')
 
 								for role in tracker.ROTATION:
-									if 'random' in role['id']: continue
+									if 'random' in role['id']:
+										continue
 
 									r_id = role['id']
 									r_info = tracker.ROLES.get(r_id, {})
@@ -648,6 +738,10 @@ def tracker_get_state():
 	return response
 
 @eel.expose
+def tracker_update_analytics():
+    pass
+
+@eel.expose
 def tracker_send_command(command):
 	tracker_wrapper = active_modules.get('tracker')
 
@@ -669,6 +763,7 @@ def tracker_send_command(command):
 			tracker.ROTATION = None
 			tracker.PLAYER_ALLIANCES = {}
 			tracker.PLAYER_CLAIMS = {}
+
 			return {'success': True}
 
 		def execute_command():
@@ -951,6 +1046,8 @@ def booster_start():
 			if not booster_instance.is_valid:
 				return {'success': False, 'error': 'Booster configuration is invalid'}
 
+			booster_instance.stats = dict(_booster_stats_session)
+
 			booster_stop_flag = stop_flags['booster']
 
 			def patched_check_stop():
@@ -964,16 +1061,22 @@ def booster_start():
 			def run_booster():
 				try:
 					logging.info('Booster thread started')
-					booster_instance.run()
+					booster_instance._run_core()
 					logging.info('Booster thread finished normally')
 				except Exception as e:
 					logging.error(f'Booster error: {e}')
 					logging.error(traceback.format_exc())
 				finally:
+					global _booster_stats_session
+					_booster_stats_session = dict(booster_instance.stats)
+
+					with logs_lock:
+						pending_states['booster'].append({'initialized': False, 'phase': 'Stopped', 'action': 'Idle'})
+
 					with locks['booster']:
 						if active_modules['booster']:
 							active_modules['booster'].safe_close_browser()
-			
+
 			thread = threading.Thread(target=run_booster, name='BoosterThread', daemon=True)
 			wrapper.thread = thread
 			module_threads['booster'] = thread
@@ -987,14 +1090,88 @@ def booster_start():
 
 			thread.start()
 
-			import time as time_module
+			_start_watchdog('booster', thread)
 
-			time_module.sleep(0.1)
-			
+			time.sleep(0.1)
+
 			return {'success': True}
 	except Exception as e:
 		logging.error(f'booster_start error: {e}')
 		logging.error(traceback.format_exc())
+
+		return {'success': False, 'error': str(e)}
+
+@eel.expose
+def booster_get_stats():
+	try:
+		wrapper = active_modules.get('booster')
+
+		if wrapper:
+			return {'success': True, 'stats': wrapper.module.stats}
+
+		return {'success': True, 'stats': dict(_booster_stats_session)}
+	except Exception as e:
+		return {'success': False, 'error': str(e)}
+
+@eel.expose
+def booster_get_guest_mode():
+	try:
+		wrapper = active_modules.get('booster')
+
+		if wrapper:
+			return {'success': True, 'guest_mode': wrapper.module.guest_mode}
+
+		return {'success': True, 'guest_mode': False}
+	except Exception as e:
+		return {'success': False, 'error': str(e)}
+
+@eel.expose
+def booster_set_guest_mode(enabled):
+	try:
+		enabled = bool(enabled)
+
+		wrapper = active_modules.get('booster')
+
+		if wrapper:
+			wrapper.module.set_guest_mode(enabled)
+
+		state = 'enabled' if enabled else 'disabled'
+		logging.info(f'Booster guest mode {state}')
+
+		return {'success': True, 'guest_mode': enabled}
+	except Exception as e:
+		logging.error(f'booster_set_guest_mode error: {e}')
+		return {'success': False, 'error': str(e)}
+
+@eel.expose
+def booster_get_headless_mode():
+	try:
+		wrapper = active_modules.get('booster')
+
+		if wrapper:
+			return {'success': True, 'headless_mode': wrapper.module.headless_mode}
+
+		return {'success': True, 'headless_mode': False}
+	except Exception as e:
+		return {'success': False, 'error': str(e)}
+
+@eel.expose
+def booster_set_headless_mode(enabled):
+	try:
+		enabled = bool(enabled)
+
+		wrapper = active_modules.get('booster')
+
+		if wrapper:
+			wrapper.module.set_headless_mode(enabled)
+
+		state = 'enabled' if enabled else 'disabled'
+
+		logging.info(f'Booster headless mode {state}')
+
+		return {'success': True, 'headless_mode': enabled}
+	except Exception as e:
+		logging.error(f'booster_set_headless_mode error: {e}')
 
 		return {'success': False, 'error': str(e)}
 
@@ -1027,41 +1204,50 @@ def spinner_start():
 		with locks['spinner']:
 			if active_modules['spinner'] and active_modules['spinner'].is_running():
 				return {'success': False, 'error': 'Spinner is already running'}
-			
+
 			stop_flags['spinner'].clear()
-			
-			spinner_instance = Spinner()
-			
+
+			spinner_instance = SpinnerMobile()
+
 			if not spinner_instance.is_valid:
 				return {'success': False, 'error': 'Spinner configuration is invalid'}
 
-			spinner_stop_flag = stop_flags['spinner']
+			spinner_instance._stop_event = stop_flags['spinner']
 
-			def patched_check_stop():
-				return spinner_stop_flag.is_set()
+			original_log = spinner_instance.log
 
-			spinner_instance.check_stop_flag = patched_check_stop
-			
+			def patched_log(msg_type, message):
+				original_log(msg_type, message)
+
+				with logs_lock:
+					pending_logs['spinner'].append({'type': msg_type, 'message': message})
+
+			spinner_instance.log = patched_log
+
 			wrapper = ModuleWrapper(spinner_instance, 'spinner')
 			active_modules['spinner'] = wrapper
-			
+
 			def run_spinner():
 				try:
 					logging.info('Spinner thread started')
+
 					spinner_instance.run()
+
 					logging.info('Spinner thread finished normally')
 				except Exception as e:
 					logging.error(f'Spinner error: {e}')
 					logging.error(traceback.format_exc())
 				finally:
+					with logs_lock:
+						pending_states['spinner'].append({'initialized': False, 'phase': 'Stopped', 'action': 'Idle'})
+
 					with locks['spinner']:
-						if active_modules['spinner']:
-							active_modules['spinner'].safe_close_browser()
-			
+						active_modules['spinner'] = None
+						module_threads['spinner'] = None
+
 			thread = threading.Thread(target=run_spinner, name='SpinnerThread', daemon=True)
 			wrapper.thread = thread
 			module_threads['spinner'] = thread
-			thread.start()
 
 			with logs_lock:
 				pending_states['spinner'].append({
@@ -1070,9 +1256,141 @@ def spinner_start():
 					'action': 'Initializing'
 				})
 
+			thread.start()
+
+			_start_watchdog('spinner', thread)
+
 			return {'success': True}
 	except Exception as e:
 		logging.error(f'spinner_start error: {e}')
+		logging.error(traceback.format_exc())
+
+		return {'success': False, 'error': str(e)}
+
+@eel.expose
+def spinner_adb_scan():
+	try:
+		from spinner import _adb_out, list_adb_devices, connect_wifi, _auto_setup_device
+
+		serial = _auto_setup_device(None)
+
+		if serial:
+			return {'serial': serial, 'devices': []}
+
+		devices = list_adb_devices()
+
+		ready = [d for d in devices if d['state'] == 'device']
+
+		return {'serial': None, 'devices': ready}
+	except Exception as e:
+		logging.error(f'spinner_adb_scan error: {e}')
+
+		return {'serial': None, 'devices': [], 'error': str(e)}
+
+@eel.expose
+def spinner_adb_connect(host, port='5555'):
+	try:
+		from spinner import connect_wifi
+
+		ok, msg = connect_wifi(host, int(port))
+
+		if ok:
+			return {'success': True}
+
+		return {'success': False, 'error': msg}
+	except Exception as e:
+		return {'success': False, 'error': str(e)}
+
+@eel.expose
+def spinner_start_mobile(serial):
+	try:
+		with locks['spinner']:
+			if active_modules['spinner'] and active_modules['spinner'].is_running():
+				return {'success': False, 'error': 'Spinner is already running'}
+
+			stop_flags['spinner'].clear()
+
+			spinner_instance = SpinnerMobile()
+
+			if not spinner_instance.is_valid:
+				return {'success': False, 'error': 'Spinner configuration is invalid'}
+
+			spinner_instance._stop_event = stop_flags['spinner']
+			spinner_instance.serial = serial
+
+			from spinner import get_screen_resolution
+
+			try:
+				spinner_instance.width, spinner_instance.height = get_screen_resolution(serial)
+			except Exception:
+				pass
+
+			original_log = spinner_instance.log
+
+			def patched_log(msg_type, message):
+				original_log(msg_type, message)
+
+				with logs_lock:
+					pending_logs['spinner'].append({'type': msg_type, 'message': message})
+
+			spinner_instance.log = patched_log
+
+			import uiautomator2 as u2
+
+			try:
+				spinner_instance.d = u2.connect(serial)
+				spinner_instance.d.info
+			except Exception as e:
+				return {'success': False, 'error': f'uiautomator2 connect failed: {e}'}
+
+			wrapper = ModuleWrapper(spinner_instance, 'spinner')
+			active_modules['spinner'] = wrapper
+
+			def run_spinner():
+				try:
+					logging.info('SpinnerMobile thread started')
+
+					while True:
+						if stop_flags['spinner'].is_set():
+							break
+
+						if not spinner_instance.prepare():
+							break
+
+						result = spinner_instance.spin()
+
+						if result == -1 or result == 1:
+							break
+
+						try:
+							spinner_instance.d.app_stop('com.werewolfapps.online')
+						except Exception:
+							pass
+
+						time.sleep(3)
+
+					logging.info('SpinnerMobile thread finished')
+				except Exception as e:
+					logging.error(f'SpinnerMobile error: {e}')
+					logging.error(traceback.format_exc())
+				finally:
+					with logs_lock:
+						pending_states['spinner'].append({'initialized': False, 'phase': 'Stopped', 'action': 'Idle'})
+
+					with locks['spinner']:
+						active_modules['spinner'] = None
+						module_threads['spinner'] = None
+
+			thread = threading.Thread(target=run_spinner, name='SpinnerThread', daemon=True)
+			wrapper.thread = thread
+			module_threads['spinner'] = thread
+			thread.start()
+
+			_start_watchdog('spinner', thread)
+
+			return {'success': True}
+	except Exception as e:
+		logging.error(f'spinner_start_mobile error: {e}')
 		logging.error(traceback.format_exc())
 
 		return {'success': False, 'error': str(e)}
@@ -1095,7 +1413,6 @@ def spinner_stop():
 			module_threads['spinner'] = None
 			
 			return {'success': True}
-			
 	except Exception as e:
 		logging.error(f'spinner_stop error: {e}')
 

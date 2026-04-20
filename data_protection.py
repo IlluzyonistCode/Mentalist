@@ -11,7 +11,6 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 
-
 class _KeyObfuscator:
 	@staticmethod
 	def _get_machine_fingerprint():
@@ -95,14 +94,14 @@ class SecureDataStore:
 		self.context = context
 		self._key = None
 	
-	def _get_key(self):
+	def get_key(self):
 		if self._key is None:
 			self._key = _KeyObfuscator.derive_key(self.context)
 
 		return self._key
 	
-	def _get_cipher(self):
-		return Fernet(self._get_key())
+	def get_cipher(self):
+		return Fernet(self.get_key())
 	
 	def encrypt_and_save(self, data):
 		try:
@@ -118,7 +117,7 @@ class SecureDataStore:
 			
 			metadata_bytes = json.dumps(metadata).encode('utf-8')
 
-			cipher = self._get_cipher()
+			cipher = self.get_cipher()
 			encrypted_data = cipher.encrypt(metadata_bytes)
 			
 			os.makedirs(os.path.dirname(self.encrypted_path) or '.', exist_ok=True)
@@ -155,7 +154,7 @@ class SecureDataStore:
 			with open(self.encrypted_path, 'rb') as f:
 				encrypted_data = f.read()
 
-			cipher = self._get_cipher()
+			cipher = self.get_cipher()
 			
 			try:
 				decrypted_bytes = cipher.decrypt(encrypted_data)

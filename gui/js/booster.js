@@ -3,8 +3,9 @@ let isInitialized = false;
 let boosterStartTime = null;
 let boosterStats = {
     gamesPlayed: 0,
+    villagerGames: 0,
     werewolfGames: 0,
-    villagerGames: 0
+    soloGames: 0
 };
 
 let currentState = {
@@ -13,12 +14,13 @@ let currentState = {
     action: 'Idle'
 };
 
-let updateInterval = null;
+let guestMode = false;
+let noPcgLocked = false;
+
 let processingLogs = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('%c Mentalist Booster Initialized ', 'background: #00ff88; color: #000; font-weight: bold;');
-
     addLog('info', 'Initializing Booster module...');
 
     try {
@@ -27,37 +29,46 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (result.success) {
             addLog('success', 'Booster started successfully!');
 
-            boosterStartTime = Date.now();
+            initGuestModeToggle();
+            initHeadlessModeToggle();
+            await initStats();
+
+            boosterStartTime = performance.now();
 
             setInterval(updateUptime, 1000);
-            updateInterval = setInterval(pollBoosterState, 2000);
-            
             setInterval(async () => {
                 if (processingLogs) return;
                 
                 try {
                     processingLogs = true;
+
                     const data = await eel.get_booster_data()();
                     
                     if (!data) return;
                     
                     if (data.states && data.states.length > 0) {
-                        const latestState = data.states[data.states.length - 1];
-                        
-                        if (latestState.initialized && !isInitialized) {
-                            isInitialized = true;
-                            setStatus('running', 'RUNNING');
-                            addLog('success', '✓ Browser ready');
-                        }
-                        
-                        if (latestState.phase) updateState('phase', latestState.phase);
-                        if (latestState.role) updateState('role', latestState.role);
-                        if (latestState.action) updateState('action', latestState.action);
+                        data.states.forEach(state => {
+                            if (state.initialized && !isInitialized) {
+                                isInitialized = true;
+
+                                setStatus('running', 'RUNNING');
+                                addLog('success', '✓ Browser ready');
+                            }
+
+                            if (state.stats) {
+                                Object.assign(boosterStats, state.stats);
+                                updateStats();
+                            }
+
+                            if (state.phase) updateState('phase', state.phase);
+                            if (state.role) updateState('role', state.role);
+                            if (state.action) updateState('action', state.action);
+                        });
                     }
                     
                     if (data.logs && data.logs.length > 0) addLogsBatch(data.logs);
-                } catch (e) {
-                    console.error('[BOOSTER] Polling error:', e);
+                } catch (error) {
+                    console.error('[BOOSTER] Polling error:', error);
                 } finally {
                     processingLogs = false;
                 }
@@ -72,18 +83,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         setStatus('error', 'FAILED');
     }
 });
-
-window.addEventListener('beforeunload', () => {
-    if (updateInterval) clearInterval(updateInterval);
-});
-
-async function pollBoosterState() {
-    try {
-        updateStateDisplay();
-    } catch (error) {
-        console.error('State polling error:', error);
-    }
-}
 
 function setStatus(level, text) {
     const indicator = document.getElementById('statusIndicator');
@@ -143,6 +142,7 @@ function parseLogForState(message) {
         updateState('action', 'PCG active');
     } else if (msg.includes('premium custom games not purchased')) {
         updateState('action', 'No PCG');
+        applyNoPcgLock();
     } else if (msg.includes('creating custom room')) {
         updateState('phase', 'Creating room');
         updateState('action', 'Setting up');
@@ -175,17 +175,13 @@ function parseLogForState(message) {
 
             updateState('role', roleCapitalized);
 
-            if (roleName.toLowerCase().includes('wolf')) {
-                updateState('phase', 'Night');
+            const isWolf = roleName.toLowerCase().includes('wolf');
 
-                boosterStats.werewolfGames++;
+            if (isWolf) {
+                updateState('phase', 'Night');
             } else {
                 updateState('phase', 'Day');
-
-                boosterStats.villagerGames++;
             }
-
-            updateStats();
         }
     } else if (msg.includes('finding players')) {
         updateState('action', 'Scanning players');
@@ -210,13 +206,15 @@ function parseLogForState(message) {
     } else if (msg.includes('end!')) {
         updateState('phase', 'Game ended');
         updateState('action', 'Processing');
-
-        boosterStats.gamesPlayed++;
-
-        updateStats();
     } else if (msg.includes('exiting')) {
         updateState('phase', 'Exiting');
         updateState('action', 'Leaving lobby');
+    } else if (msg.includes('guest mode')) {
+        const isGuest = msg.includes('enabled');
+
+        guestMode = isGuest;
+
+        applyGuestModeUI(isGuest);
     }
 }
 
@@ -258,19 +256,189 @@ function updateStateDisplay() {
 
 function updateStats() {
     document.getElementById('gamesPlayed').textContent = boosterStats.gamesPlayed;
-    document.getElementById('werewolfGames').textContent = boosterStats.werewolfGames;
     document.getElementById('villagerGames').textContent = boosterStats.villagerGames;
+    document.getElementById('werewolfGames').textContent = boosterStats.werewolfGames;
+    document.getElementById('soloGames').textContent = boosterStats.soloGames;
 }
 
 function updateUptime() {
     if (!boosterStartTime) return;
 
-    const elapsed = Math.floor((Date.now() - boosterStartTime) / 1000);
+    const elapsed = Math.floor((performance.now() - boosterStartTime) / 1000);
     const hours = Math.floor(elapsed / 3600).toString().padStart(2, '0');
     const minutes = Math.floor((elapsed % 3600) / 60).toString().padStart(2, '0');
     const seconds = (elapsed % 60).toString().padStart(2, '0');
 
     document.getElementById('uptime').textContent = `${hours}:${minutes}:${seconds}`;
+}
+
+async function initStats() {
+    try {
+        const result = await eel.booster_get_stats()();
+
+        if (result && result.success && result.stats) {
+            Object.assign(boosterStats, result.stats);
+            
+            updateStats();
+        }
+    } catch (e) {
+        console.warn('[BOOSTER] Could not load stats:', e);
+    }
+}
+
+async function initGuestModeToggle() {
+    try {
+        const result = await eel.booster_get_guest_mode()();
+
+        if (result && result.success) {
+            guestMode = result.guest_mode;
+
+            applyGuestModeUI(guestMode);
+        }
+    } catch (e) {
+        console.warn('[BOOSTER] Could not read guest mode:', e);
+    }
+}
+
+function applyNoPcgLock() {
+    noPcgLocked = true;
+    guestMode = true;
+
+    applyGuestModeUI(true);
+
+    const btn = document.getElementById('guestModeToggle');
+    const desc = document.getElementById('guestModeDesc');
+
+    if (btn) {
+        btn.dataset.locked = '1';
+        btn.style.opacity = '0.45';
+        btn.style.cursor = 'not-allowed';
+        btn.title = 'Host mode requires Premium Custom Games';
+    }
+
+    if (desc) desc.textContent = 'Joining existing rooms (no PCG)';
+
+    addLog('warning', 'No PCG — Host mode locked, joining rooms only');
+}
+
+function applyGuestModeUI(isGuest) {
+    const btn = document.getElementById('guestModeToggle');
+    const label = document.getElementById('guestModeLabel');
+    const desc = document.getElementById('guestModeDesc');
+
+    if (!btn) return;
+
+    if (isGuest) {
+        btn.classList.add('is-guest');
+        label.textContent = 'GUEST';
+        desc.textContent = 'Joining existing rooms';
+    } else {
+        btn.classList.remove('is-guest');
+        label.textContent = 'HOST';
+        desc.textContent = 'Creating own rooms';
+    }
+}
+
+async function toggleGuestMode() {
+    if (noPcgLocked) return;
+
+    const btn = document.getElementById('guestModeToggle');
+
+    if (btn && btn.dataset.locked) return;
+
+    if (btn) btn.dataset.locked = '1';
+
+    guestMode = !guestMode;
+
+    applyGuestModeUI(guestMode);
+
+    try {
+        const result = await eel.booster_set_guest_mode(guestMode)();
+
+        if (!result || !result.success) {
+            guestMode = !guestMode;
+
+            applyGuestModeUI(guestMode);
+            addLog('error', 'Failed to switch guest mode');
+        } else {
+            const state = guestMode ? 'GUEST (joining rooms only)' : 'HOST (creating rooms)';
+
+            addLog('info', `Mode switched → ${state}`);
+        }
+    } catch (e) {
+        guestMode = !guestMode;
+
+        applyGuestModeUI(guestMode);
+        addLog('error', `Guest mode error: ${e}`);
+    } finally {
+        if (btn) delete btn.dataset.locked;
+    }
+}
+
+let headlessMode = false;
+
+async function initHeadlessModeToggle() {
+    try {
+        const result = await eel.booster_get_headless_mode()();
+
+        if (result && result.success) {
+            headlessMode = result.headless_mode;
+
+            applyHeadlessModeUI(headlessMode);
+        }
+    } catch (e) {
+        console.warn('[BOOSTER] Could not read headless mode:', e);
+    }
+}
+
+function applyHeadlessModeUI(isHeadless) {
+    const btn = document.getElementById('headlessModeToggle');
+    const label = document.getElementById('headlessModeLabel');
+
+    if (!btn) return;
+
+    if (isHeadless) {
+        btn.classList.add('is-guest');
+        label.textContent = 'HIDDEN';
+    } else {
+        btn.classList.remove('is-guest');
+        label.textContent = 'VISIBLE';
+    }
+}
+
+async function toggleHeadlessMode() {
+    const btn = document.getElementById('headlessModeToggle');
+
+    if (btn && btn.dataset.locked) return;
+
+    if (btn) btn.dataset.locked = '1';
+
+    headlessMode = !headlessMode;
+
+    applyHeadlessModeUI(headlessMode);
+
+    try {
+        const result = await eel.booster_set_headless_mode(headlessMode)();
+
+        if (!result || !result.success) {
+            headlessMode = !headlessMode;
+
+            applyHeadlessModeUI(headlessMode);
+            addLog('error', 'Failed to switch browser mode');
+        } else {
+            const state = headlessMode ? 'HIDDEN (headless)' : 'VISIBLE';
+
+            addLog('info', `Browser mode → ${state}`);
+            addLog('warning', 'Browser will restart on next cycle');
+        }
+    } catch (e) {
+        headlessMode = !headlessMode;
+
+        applyHeadlessModeUI(headlessMode);
+        addLog('error', `Browser mode error: ${e}`);
+    } finally {
+        if (btn) delete btn.dataset.locked;
+    }
 }
 
 function clearLog() {

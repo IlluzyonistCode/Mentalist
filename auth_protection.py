@@ -9,7 +9,6 @@ from pathlib import Path
 from functools import wraps
 from datetime import datetime
 
-
 def is_frozen():
 	return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
 
@@ -439,11 +438,11 @@ class IntegrityChecker:
 				return self._get_phantom_key()
 
 		if is_frozen():
-			return self._verify_pyd_integrity()
+			return self.verify_pyd_integrity()
 
-		return self._verify_py_integrity()
+		return self.verify_py_integrity()
 	
-	def _verify_pyd_integrity(self):
+	def verify_pyd_integrity(self):
 		try:
 			pyd_files = find_pyd_files()
 			
@@ -480,7 +479,7 @@ class IntegrityChecker:
 
 			return self._get_phantom_key()
 
-	def _verify_py_integrity(self):
+	def verify_py_integrity(self):
 		for filepath, expected in self.file_hashes.items():
 			try:
 				if not os.path.exists(filepath):

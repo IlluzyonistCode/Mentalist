@@ -15,4 +15,5 @@ pytz
 pywinauto
 requests
 tzlocal
+uiautomator2
 undetected-playwright-patch

@@ -1,7 +1,37 @@
 import os
 import sys
+import warnings
+
+warnings.filterwarnings('ignore', category=Warning, module='gevent')
+
+from gevent import monkey
+
+if sys.platform != 'darwin':
+    monkey.patch_all(subprocess=False)
+
+if getattr(sys, 'frozen', False):
+    base_path = sys._MEIPASS
+
+    ms_playwright_path = os.path.join(base_path, 'ms-playwright')
+
+    if os.path.exists(ms_playwright_path):
+        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = ms_playwright_path
+
+    for node_path in [
+        os.path.join(base_path, 'playwright', 'driver', 'node.exe'),
+        os.path.join(base_path, 'ms-playwright', 'node.exe'),
+        os.path.join(base_path, 'node', 'node.exe'),
+    ]:
+        if os.path.exists(node_path):
+            os.environ['PLAYWRIGHT_NODEJS_PATH'] = node_path
+            break
+
 from colorama import Fore, Back, Style, init
-from mentalist import Tracker, Booster, Stalker, Spinner, set_launch_mode, check_updates_on_startup, banner
+from utils import set_launch_mode, check_updates_on_startup, banner
+from tracker import Tracker
+from booster import Booster
+from stalker import Stalker
+from spinner import SpinnerDesktop, SpinnerMobile
 
 set_launch_mode('CLI')
 
@@ -9,16 +39,16 @@ set_launch_mode('CLI')
 def main():
 	try:
 		init(autoreset=True)
-		
+
 		while True:
 			banner()
 
 			check_updates_on_startup()
 
-			module_classes = [Tracker, Booster, Stalker]
+			module_classes = [Tracker, Booster, Stalker, SpinnerMobile]
 
-			if os.name == 'nt':
-				module_classes.append(Spinner)
+			if sys.platform == 'win32':
+				module_classes.append(SpinnerDesktop)
 
 			modules = []
 			disabled_modules = []
@@ -30,15 +60,17 @@ def main():
 					modules.append(instance)
 
 				else:
-					disabled_modules.append(module_class.__name__)
+					module_name = getattr(module_class, 'menu_name', module_class.__name__)
+
+					disabled_modules.append(module_name)
 
 			print()
 
 			for i, module in enumerate(modules):
-				module_name = module.__class__.__name__
+				module_name = getattr(module, 'menu_name', module.__class__.__name__)
 
 				print(f'{Style.BRIGHT}{Fore.GREEN}{i + 1}. {Fore.RESET}{Back.GREEN}{module_name}')
-			
+
 			if len(disabled_modules) < len(modules):
 				print(f'{Style.BRIGHT}{Fore.GREEN}{len(modules) + 1}. {Fore.RESET}{Back.GREEN}Updater')
 
@@ -51,7 +83,7 @@ def main():
 			if not modules:
 				print(f'\n{Style.BRIGHT}{Back.RED}All modules failed to load! Check your config.txt file.{Back.RESET}')
 				input('Press Enter to exit.')
-				
+
 				break
 
 			while True:
