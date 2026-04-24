@@ -16,24 +16,24 @@ from auth_decorator import require_module_auth
 from auth_protection import _integrity_checker
 from data_protection import save_encrypted, load_encrypted
 from translations import (
-    match_event,
-    is_winner_event,
-    is_game_phase,
-    parse_player_token,
-    extract_role_from_token
+	match_event,
+	is_winner_event,
+	is_game_phase,
+	parse_player_token,
+	extract_role_from_token
 )
 from utils import (
-    MENTALIST_DATA_DIR,
-    USER_DATA_DIR,
-    CONFIG_PATH,
-    VERSION,
-    _launch_mode,
-    _pause,
-    get_resource_path,
-    find_chrome_executable,
-    generate_random_user_agent,
-    MACOS_DISABLE_PLAYWRIGHT_THREADING,
-    banner
+	MENTALIST_DATA_DIR,
+	USER_DATA_DIR,
+	CONFIG_PATH,
+	VERSION,
+	_launch_mode,
+	_pause,
+	get_resource_path,
+	find_chrome_executable,
+	generate_random_user_agent,
+	MACOS_DISABLE_PLAYWRIGHT_THREADING,
+	banner
 )
 from updater import MentalistUpdater
 from analytics import BayesEngine, NLPAnalyzer
@@ -1993,7 +1993,6 @@ class Tracker:
 				candidate.wait_for(state='visible', timeout=1000)
 
 				day_chat = candidate.first
-
 				dead_chat = self.page.locator(f'xpath=/html/body/div[1]/div/div/div/div/div/div[{n}]/div/div/div/div/div[2]/div/div/div/div/div[1]/div/div[1]/div[1]/div/div[2]/div[1]/div[3]/div/div/div/div[1]/div/div[1]/div').first
 
 				break

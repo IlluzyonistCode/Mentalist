@@ -24,16 +24,16 @@ from auth_decorator import require_module_auth
 from auth_protection import _integrity_checker
 from data_protection import save_encrypted, load_encrypted
 from utils import (
-    BASE_DIR,
-    MENTALIST_DATA_DIR,
-    USER_DATA_DIR,
-    CONFIG_PATH,
-    _launch_mode,
-    _pause,
-    get_resource_path,
-    find_chrome_executable,
-    generate_random_user_agent,
-    banner
+	BASE_DIR,
+	MENTALIST_DATA_DIR,
+	USER_DATA_DIR,
+	CONFIG_PATH,
+	_launch_mode,
+	_pause,
+	get_resource_path,
+	find_chrome_executable,
+	generate_random_user_agent,
+	banner
 )
 
 class Stalker:

@@ -26,7 +26,7 @@ from auth_protection import AntiDebug, WindowsAntiDebug, _integrity_checker, _gl
 init(autoreset=True)
 
 _auth_session_cache = None
-EXPECTED_SPKI_HASH = 'gMjirtN/00VjGvJ6KPE70oOy+BV3gn6RZPaT9Qh38/w='
+EXPECTED_SPKI_HASH = 'jnwIx3cI+wAammrHMrxyYsYoFf2pwA7teZx8KDWel04='
 
 
 class AuthenticationError(Exception):

@@ -7,24 +7,24 @@ warnings.filterwarnings('ignore', category=Warning, module='gevent')
 from gevent import monkey
 
 if sys.platform != 'darwin':
-    monkey.patch_all(subprocess=False)
+	monkey.patch_all(subprocess=False)
 
 if getattr(sys, 'frozen', False):
-    base_path = sys._MEIPASS
+	base_path = sys._MEIPASS
 
-    ms_playwright_path = os.path.join(base_path, 'ms-playwright')
+	ms_playwright_path = os.path.join(base_path, 'ms-playwright')
 
-    if os.path.exists(ms_playwright_path):
-        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = ms_playwright_path
+	if os.path.exists(ms_playwright_path):
+		os.environ['PLAYWRIGHT_BROWSERS_PATH'] = ms_playwright_path
 
-    for node_path in [
-        os.path.join(base_path, 'playwright', 'driver', 'node.exe'),
-        os.path.join(base_path, 'ms-playwright', 'node.exe'),
-        os.path.join(base_path, 'node', 'node.exe'),
-    ]:
-        if os.path.exists(node_path):
-            os.environ['PLAYWRIGHT_NODEJS_PATH'] = node_path
-            break
+	for node_path in [
+		os.path.join(base_path, 'playwright', 'driver', 'node.exe'),
+		os.path.join(base_path, 'ms-playwright', 'node.exe'),
+		os.path.join(base_path, 'node', 'node.exe'),
+	]:
+		if os.path.exists(node_path):
+			os.environ['PLAYWRIGHT_NODEJS_PATH'] = node_path
+			break
 
 from colorama import Fore, Back, Style, init
 from utils import set_launch_mode, check_updates_on_startup, banner

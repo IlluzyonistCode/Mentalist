@@ -7,7 +7,7 @@ warnings.filterwarnings('ignore', category=Warning, module='gevent')
 from gevent import monkey
 
 if sys.platform != 'darwin':
-    monkey.patch_all(subprocess=False)
+	monkey.patch_all(subprocess=False)
 
 import eel
 import requests
@@ -20,22 +20,22 @@ import traceback
 import tkinter as tk
 
 if getattr(sys, 'frozen', False):
-    base_path = sys._MEIPASS
+	base_path = sys._MEIPASS
 
-    ms_playwright_path = os.path.join(base_path, 'ms-playwright')
+	ms_playwright_path = os.path.join(base_path, 'ms-playwright')
 
-    if os.path.exists(ms_playwright_path):
-        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = ms_playwright_path
+	if os.path.exists(ms_playwright_path):
+		os.environ['PLAYWRIGHT_BROWSERS_PATH'] = ms_playwright_path
 
-    for node_path in [
-        os.path.join(base_path, 'playwright', 'driver', 'node.exe'),
-        os.path.join(base_path, 'ms-playwright', 'node.exe'),
-        os.path.join(base_path, 'node', 'node.exe'),
-    ]:
-        if os.path.exists(node_path):
-            os.environ['PLAYWRIGHT_NODEJS_PATH'] = node_path
+	for node_path in [
+		os.path.join(base_path, 'playwright', 'driver', 'node.exe'),
+		os.path.join(base_path, 'ms-playwright', 'node.exe'),
+		os.path.join(base_path, 'node', 'node.exe'),
+	]:
+		if os.path.exists(node_path):
+			os.environ['PLAYWRIGHT_NODEJS_PATH'] = node_path
 
-            break
+			break
 
 try:
 	import pyi_splash
@@ -54,7 +54,7 @@ from stalker import Stalker
 from spinner import SpinnerMobile
 
 if os.name == 'nt':
-    from spinner import SpinnerDesktop
+	from spinner import SpinnerDesktop
 
 set_launch_mode('GUI')
 
@@ -739,7 +739,7 @@ def tracker_get_state():
 
 @eel.expose
 def tracker_update_analytics():
-    pass
+	pass
 
 @eel.expose
 def tracker_send_command(command):
